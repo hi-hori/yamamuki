@@ -30,8 +30,10 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.shohei0205.yamamuki.core.byteSizeText
 import io.github.shohei0205.yamamuki.data.CacheInfo
@@ -136,12 +138,37 @@ fun SettingsScreen(
                 title = "取得したデータを使う期間",
                 options = Settings.CACHE_MAX_AGE_DAYS,
                 selected = settings.cacheMaxAgeDays,
-                label = { if (it == 365) "1年" else "${it}日" },
+                // 5 つ並ぶと「180日」が収まらないので、長い期間は「半年」「1年」と書く。
+                label = {
+                    when (it) {
+                        180 -> "半年"
+                        365 -> "1年"
+                        else -> "${it}日"
+                    }
+                },
                 description = "この期間を過ぎた地域は取り直します。山のデータはほとんど変わらないので、長くすると通信が減ります。",
                 onSelect = { v -> onSettingsChange { it.copy(cacheMaxAgeDays = v) } },
             )
             CacheSection(cacheInfo, onClearCache)
+
+            HorizontalDivider()
+            SectionTitle("このアプリについて")
+            AboutSection()
         }
+    }
+}
+
+@Composable
+private fun AboutSection() {
+    val context = LocalContext.current
+    // build.gradle.kts の versionName / versionCode。
+    val version = remember(context) {
+        val info = context.packageManager.getPackageInfo(context.packageName, 0)
+        "${info.versionName} (${PackageInfoCompat.getLongVersionCode(info)})"
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("バージョン $version", style = MaterialTheme.typography.bodyLarge)
+        Text("山データ © OpenStreetMap contributors (ODbL)", style = MaterialTheme.typography.bodySmall)
     }
 }
 
