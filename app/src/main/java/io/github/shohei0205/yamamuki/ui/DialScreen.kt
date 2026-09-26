@@ -102,6 +102,11 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
     // 選んだ山は ID で持ち、表示中の一覧から引く。歩いて現在地が変わると距離も更新される。
     var selectedId by remember { mutableStateOf<Long?>(null) }
     val selected = state.mountains.firstOrNull { it.mountain.osmId == selectedId }
+    // 取り直しで一覧から消えたら選択も解く。残しておくと、その山が一覧に戻ったときにダイアログが勝手に開く。
+    val selectionLost = selectedId != null && selected == null
+    LaunchedEffect(selectionLost) {
+        if (selectionLost) selectedId = null
+    }
 
     Box(
         Modifier
