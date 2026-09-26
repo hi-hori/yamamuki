@@ -30,11 +30,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.shohei0205.yamamuki.core.Box
 import io.github.shohei0205.yamamuki.core.DialGeometry
+import io.github.shohei0205.yamamuki.core.ElevationClass
 import io.github.shohei0205.yamamuki.core.Heading
 import io.github.shohei0205.yamamuki.core.Mountain
 import io.github.shohei0205.yamamuki.core.NearbyMountain
 import io.github.shohei0205.yamamuki.core.declutter
-import io.github.shohei0205.yamamuki.core.displayLabel
+import io.github.shohei0205.yamamuki.core.elevationClass
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -44,6 +45,9 @@ val DialBeige = Color(0xFFEFE4B0)
 private val RingGray = Color(0xFFC3C3C3)
 private val PeakGreen = Color(0xFF22B14C)
 private val PeakYellow = Color(0xFFB5E61D)
+private val HillGreen = Color(0xFF9BD65A)
+private val PeakBrown = Color(0xFF8C5A2B)
+private val SnowWhite = Color(0xFFFFFFFF)
 private val NorthRed = Color(0xFFED1C24)
 private val BinocularBody = Color(0xFF333333)
 private val BinocularHinge = Color(0xFF777777)
@@ -60,9 +64,10 @@ private val RingLabelStyle = TextStyle(color = RingGray, fontSize = 12.sp, fontW
 private val ReadoutStyle = TextStyle(color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Bold)
 
 /**
- * 方位盤。現在地(画面下部の双眼鏡)から向いている方向を上にとり、山を ▲ と「山名 (標高)」で描く。
+ * 方位盤。現在地(画面下部の双眼鏡)から向いている方向を上にとり、山をアイコンと山名で描く。
+ * アイコンの色と形は標高の区分([ElevationClass])で変える。
  * [mountains] は表示の優先順(標高の高い順)に並んでいること。重なる山は優先度の低いほうを省く。
- * 描いた山(▲ か山名)をタップすると [onMountainTap] を呼ぶ。
+ * 描いた山(アイコンか山名)をタップすると [onMountainTap] を呼ぶ。
  */
 @Composable
 fun DialCanvas(
@@ -122,7 +127,7 @@ private class PlacedPeak(
     val mountain: NearbyMountain,
     val position: Offset,
     val label: TextLayoutResult,
-    /** ▲ と山名を合わせた範囲。重なりの判定とタップの当たり判定に使う。 */
+    /** アイコンと山名を合わせた範囲。重なりの判定とタップの当たり判定に使う。 */
     val box: Box,
 )
 
@@ -130,7 +135,7 @@ private class PlacedPeak(
 private class HitTargets {
     var peaks: List<PlacedPeak> = emptyList()
 
-    /** [tap] を含む山のうち、▲ が最も近いもの。枠を [slop] だけ広げて判定する。 */
+    /** [tap] を含む山のうち、アイコンが最も近いもの。枠を [slop] だけ広げて判定する。 */
     fun find(tap: Offset, slop: Float): NearbyMountain? = peaks
         .filter { with(it.box) { tap.x in left - slop..right + slop && tap.y in top - slop..bottom + slop } }
         .minByOrNull { (it.position - tap).getDistanceSquared() }
@@ -145,8 +150,6 @@ private fun DrawScope.drawPeaks(
     chartTop: Float,
     textMeasurer: TextMeasurer,
 ): List<PlacedPeak> {
-    val halfWidth = 11.dp.toPx()
-    val height = 18.dp.toPx()
     val gap = 2.dp.toPx()
 
     val visible = mountains.asSequence()
@@ -154,13 +157,15 @@ private fun DrawScope.drawPeaks(
             val o = DialGeometry.project(m.distanceKm, m.bearingDeg, headingDeg)
             m to Offset(observer.x + (o.x * pxPerKm).toFloat(), observer.y - (o.y * pxPerKm).toFloat())
         }
-        .filter { (_, p) -> p.x in 0f..size.width && p.y - height >= chartTop && p.y < observer.y }
+        .filter { (_, p) -> p.x in 0f..size.width && p.y - PeakIcon.MAX_HEIGHT_DP.dp.toPx() >= chartTop && p.y < observer.y }
         .map { (m, p) ->
-            val label = textMeasurer.measure(m.mountain.displayLabel(), LabelStyle)
+            val icon = PeakIcon.of(m.mountain.elevationClass())
+            val halfWidth = icon.halfWidthDp.dp.toPx()
+            val label = textMeasurer.measure(m.mountain.name, LabelStyle)
             val labelHalf = label.size.width / 2f
             val box = Box(
                 left = min(p.x - halfWidth, p.x - labelHalf),
-                top = p.y - height,
+                top = p.y - icon.heightDp.dp.toPx(),
                 right = max(p.x + halfWidth, p.x + labelHalf),
                 bottom = p.y + gap + label.size.height,
             )
@@ -172,11 +177,65 @@ private fun DrawScope.drawPeaks(
 
     for (peak in placed) {
         val p = peak.position
-        drawTriangle(p, halfWidth, height, PeakGreen)
-        drawTriangle(Offset(p.x, p.y - height * 0.14f), halfWidth * 0.45f, height * 0.45f, PeakYellow)
+        drawPeakIcon(p, PeakIcon.of(peak.mountain.mountain.elevationClass()))
         drawText(peak.label, topLeft = Offset(p.x - peak.label.size.width / 2f, p.y + gap))
     }
     return placed
+}
+
+/** 標高の区分ごとの山アイコンの大きさ(dp)。底辺の中点が山の位置に来る。 */
+private enum class PeakIcon(val halfWidthDp: Float, val heightDp: Float) {
+    /** 1000m 未満(標高不明を含む): 黄緑の低い丘。 */
+    HILL(halfWidthDp = 10f, heightDp = 11f),
+
+    /** 1000m 以上 2000m 未満: 緑の ▲ に黄色の小 ▲。 */
+    PEAK(halfWidthDp = 11f, heightDp = 18f),
+
+    /** 2000m 以上: 茶色の高く尖った ▲ に白い雪の冠。 */
+    ALPINE(halfWidthDp = 12f, heightDp = 25f),
+    ;
+
+    companion object {
+        const val MAX_HEIGHT_DP = 25f
+
+        fun of(cls: ElevationClass): PeakIcon = when (cls) {
+            ElevationClass.LOW -> HILL
+            ElevationClass.MIDDLE -> PEAK
+            ElevationClass.HIGH -> ALPINE
+        }
+    }
+}
+
+private fun DrawScope.drawPeakIcon(p: Offset, icon: PeakIcon) {
+    val halfWidth = icon.halfWidthDp.dp.toPx()
+    val height = icon.heightDp.dp.toPx()
+    when (icon) {
+        PeakIcon.HILL -> {
+            // 底辺を直径とする半楕円。縁取りで背景のベージュから浮かせる。
+            val topLeft = Offset(p.x - halfWidth, p.y - height)
+            val oval = Size(halfWidth * 2, height * 2)
+            drawArc(HillGreen, startAngle = 180f, sweepAngle = 180f, useCenter = true, topLeft = topLeft, size = oval)
+            drawArc(
+                PeakGreen,
+                startAngle = 180f,
+                sweepAngle = 180f,
+                useCenter = true,
+                topLeft = topLeft,
+                size = oval,
+                style = Stroke(width = 1.5f.dp.toPx()),
+            )
+        }
+        PeakIcon.PEAK -> {
+            drawTriangle(p, halfWidth, height, PeakGreen)
+            drawTriangle(Offset(p.x, p.y - height * 0.14f), halfWidth * 0.45f, height * 0.45f, PeakYellow)
+        }
+        PeakIcon.ALPINE -> {
+            drawTriangle(p, halfWidth, height, PeakBrown)
+            // 頂上から高さの 35% を白く塗って雪を表す。相似な三角形なので幅も同じ比率。
+            val snow = 0.35f
+            drawTriangle(Offset(p.x, p.y - height * (1 - snow)), halfWidth * snow, height * snow, SnowWhite)
+        }
+    }
 }
 
 /** 底辺の中点を [bottomCenter] とする二等辺三角形。 */
@@ -297,6 +356,7 @@ private fun DialCanvasPreview() {
             peak("□□山", 1212.0, 8.0, 20.0),
             peak("○○山", 560.0, 12.5, -18.0),
             peak("○×山", 122.0, 3.5, -20.0),
+            peak("△△岳", 2456.0, 15.0, 5.0),
         ),
         rangeKm = DialGeometry.DEFAULT_RANGE_KM,
         modifier = Modifier.fillMaxSize().background(DialBeige),
