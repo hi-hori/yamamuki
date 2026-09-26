@@ -128,8 +128,13 @@ class DeclutterTest {
     }
 
     @Test
-    fun label() {
-        assertEquals("□□山 (1,212m)", Mountain(1, "□□山", 0.0, 0.0, 1212.4).displayLabel())
-        assertEquals("○○山", Mountain(2, "○○山", 0.0, 0.0, null).displayLabel())
+    fun elevationClass() {
+        fun cls(ele: Double?) = Mountain(1, "山", 0.0, 0.0, ele).elevationClass()
+        assertEquals(ElevationClass.LOW, cls(null))
+        assertEquals(ElevationClass.LOW, cls(999.9))
+        assertEquals(ElevationClass.MIDDLE, cls(1000.0))
+        assertEquals(ElevationClass.MIDDLE, cls(1999.9))
+        assertEquals(ElevationClass.HIGH, cls(2000.0))
+        assertEquals(ElevationClass.HIGH, cls(3776.0))
     }
 }

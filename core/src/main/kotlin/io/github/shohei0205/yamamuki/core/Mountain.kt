@@ -17,10 +17,25 @@ data class NearbyMountain(
     val bearingDeg: Double,
 )
 
-/** 方位盤に出す表示名。「山名 (1,212m)」、標高不明なら山名のみ。 */
-fun Mountain.displayLabel(): String {
-    val ele = elevationM ?: return name
-    return String.format(java.util.Locale.US, "%s (%,dm)", name, Math.round(ele))
+/** 方位盤で山アイコンの色と形を分ける標高の区分。 */
+enum class ElevationClass {
+    /** 1000m 未満。標高不明もここに含める。 */
+    LOW,
+
+    /** 1000m 以上 2000m 未満。 */
+    MIDDLE,
+
+    /** 2000m 以上。 */
+    HIGH,
+}
+
+fun Mountain.elevationClass(): ElevationClass {
+    val ele = elevationM ?: return ElevationClass.LOW
+    return when {
+        ele < 1000.0 -> ElevationClass.LOW
+        ele < 2000.0 -> ElevationClass.MIDDLE
+        else -> ElevationClass.HIGH
+    }
 }
 
 /** 詳細表示の標高。「1,212 m」、不明なら「不明」。 */
