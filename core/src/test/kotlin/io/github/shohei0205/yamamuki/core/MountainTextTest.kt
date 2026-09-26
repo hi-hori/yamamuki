@@ -40,4 +40,13 @@ class MountainTextTest {
         assertEquals("820 KB", byteSizeText(820L * 1024))
         assertEquals("1.3 MB", byteSizeText(1_363_149))
     }
+
+    @Test
+    fun summitIsNearestWithinRadius() {
+        fun near(id: Long, km: Double) = NearbyMountain(fuji.copy(osmId = id), km, 0.0)
+        assertEquals(null, summitAt(emptyList()))
+        assertEquals(null, summitAt(listOf(near(1, 0.031), near(2, 3.0))))
+        assertEquals(2L, summitAt(listOf(near(1, 0.025), near(2, 0.01), near(3, 5.0)))?.mountain?.osmId)
+        assertEquals(1L, summitAt(listOf(near(1, 0.03)))?.mountain?.osmId)
+    }
 }

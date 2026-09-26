@@ -17,6 +17,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextLayoutResult
@@ -52,6 +54,9 @@ private val NorthRed = Color(0xFFED1C24)
 private val BinocularBody = Color(0xFF333333)
 private val BinocularHinge = Color(0xFF777777)
 private val LensBlue = Color(0xFF5B8DB8)
+private val SummitRock = Color(0xFF5D6D7E)
+private val SummitRockLight = Color(0xFF8A99A8)
+private val FlagPole = Color(0xFF333333)
 
 /** 画面上部の方位目盛りに収める角度の幅。 */
 private const val TAPE_SPAN_DEG = 60.0
@@ -71,6 +76,7 @@ private class DialTextStyles(scale: Float) {
  * アイコンの色と形は標高の区分([ElevationClass])で変える。
  * [mountains] は表示の優先順(標高の高い順)に並んでいること。重なる山は優先度の低いほうを省く。
  * 描いた山(アイコンか山名)をタップすると [onMountainTap] を呼ぶ。
+ * 現在地がほぼ山頂([summit] が非 null)のときは、双眼鏡の代わりに山頂アイコンと山名を描き、そのタップも [onMountainTap] に渡す。
  */
 @Composable
 fun DialCanvas(
@@ -79,6 +85,8 @@ fun DialCanvas(
     rangeKm: Double,
     modifier: Modifier = Modifier,
     onMountainTap: (NearbyMountain) -> Unit = {},
+    /** 現在地がほぼ山頂のとき、その山。 */
+    summit: NearbyMountain? = null,
     /** 現在地の標高(海抜)。方位の表示の後ろに添える。null なら出さない。 */
     altitudeM: Double? = null,
     /** 一度に表示する山の上限。 */
@@ -106,7 +114,12 @@ fun DialCanvas(
         } else {
             emptyList()
         }
-        drawBinoculars(observer)
+        hitTargets.summit = if (summit != null) {
+            drawSummit(observer, summit, textMeasurer, styles)
+        } else {
+            drawBinoculars(observer)
+            null
+        }
         drawTape(headingDeg, tapeHeight, textMeasurer)
         drawReadout(headingDeg, altitudeM, tapeHeight, textMeasurer, styles)
     }
@@ -146,11 +159,15 @@ private class PlacedPeak(
 private class HitTargets {
     var peaks: List<PlacedPeak> = emptyList()
 
+    /** 現在地の山頂アイコンと山名。山と重なっても優先する。 */
+    var summit: PlacedPeak? = null
+
     /** [tap] を含む山のうち、アイコンが最も近いもの。枠を [slop] だけ広げて判定する。 */
-    fun find(tap: Offset, slop: Float): NearbyMountain? = peaks
-        .filter { with(it.box) { tap.x in left - slop..right + slop && tap.y in top - slop..bottom + slop } }
-        .minByOrNull { (it.position - tap).getDistanceSquared() }
-        ?.mountain
+    fun find(tap: Offset, slop: Float): NearbyMountain? {
+        fun PlacedPeak.hit() = with(box) { tap.x in left - slop..right + slop && tap.y in top - slop..bottom + slop }
+        summit?.takeIf { it.hit() }?.let { return it.mountain }
+        return peaks.filter { it.hit() }.minByOrNull { (it.position - tap).getDistanceSquared() }?.mountain
+    }
 }
 
 private fun DrawScope.drawPeaks(
@@ -263,6 +280,100 @@ private fun DrawScope.drawTriangle(bottomCenter: Offset, halfWidth: Float, heigh
 }
 
 /**
+ * 現在地がほぼ山頂のときに双眼鏡の代わりに描く、旗の立った岩山のアイコンと山名。
+ * 向いている方位が分かるよう、双眼鏡と同じ視野の扇形を山頂から前方へ描く(旗はその上に重ねる)。
+ * 方位盤の山アイコン(丘・緑の ▲・雪の ▲)と見分けられるよう、灰色の岩肌に赤い旗を立てる。
+ * 山名は右側に白い下地付きで置く(下は画面の端、上は方位盤なので)。タップの当たり判定用の範囲を返す。
+ */
+private fun DrawScope.drawSummit(
+    center: Offset,
+    summit: NearbyMountain,
+    textMeasurer: TextMeasurer,
+    styles: DialTextStyles,
+): PlacedPeak {
+    val u = 1.dp.toPx()
+    fun at(x: Float, y: Float) = Offset(center.x + x * u, center.y + y * u)
+
+    val rock = Path().apply {
+        moveTo(at(-16f, 10f).x, at(-16f, 10f).y)
+        lineTo(at(-8f, -2f).x, at(-8f, -2f).y)
+        lineTo(at(-4f, 1f).x, at(-4f, 1f).y)
+        lineTo(at(2f, -8f).x, at(2f, -8f).y)
+        lineTo(at(16f, 10f).x, at(16f, 10f).y)
+        close()
+    }
+    // 日の当たる面。右の尾根を明るくして立体に見せる。
+    val lit = Path().apply {
+        moveTo(at(2f, -8f).x, at(2f, -8f).y)
+        lineTo(at(16f, 10f).x, at(16f, 10f).y)
+        lineTo(at(7f, 10f).x, at(7f, 10f).y)
+        close()
+    }
+    val flag = Path().apply {
+        moveTo(at(2f, -24f).x, at(2f, -24f).y)
+        lineTo(at(13f, -20.5f).x, at(13f, -20.5f).y)
+        lineTo(at(2f, -17f).x, at(2f, -17f).y)
+        close()
+    }
+    val poleTop = at(2f, -24f)
+    val poleBottom = at(2f, -8f)
+
+    drawViewCone(at(0f, -6f))
+
+    // 白い縁取り → 本体の順に描く。
+    val halo = Stroke(width = 4f * u, join = StrokeJoin.Round)
+    drawPath(rock, Color.White, style = halo)
+    drawPath(flag, Color.White, style = halo)
+    drawLine(Color.White, poleTop, poleBottom, strokeWidth = 5f * u, cap = StrokeCap.Round)
+    drawPath(rock, SummitRock)
+    drawPath(lit, SummitRockLight)
+    drawLine(FlagPole, poleTop, poleBottom, strokeWidth = 2f * u, cap = StrokeCap.Round)
+    drawPath(flag, NorthRed)
+
+    val label = textMeasurer.measure(summit.mountain.name, styles.label)
+    val padX = 5f * u
+    val padY = 2f * u
+    val labelLeft = center.x + 22f * u
+    val labelTop = center.y - 4f * u - label.size.height / 2f
+    drawRoundRect(
+        Color.White.copy(alpha = 0.85f),
+        topLeft = Offset(labelLeft - padX, labelTop - padY),
+        size = Size(label.size.width + padX * 2, label.size.height + padY * 2),
+        cornerRadius = CornerRadius(4f * u),
+    )
+    drawText(label, topLeft = Offset(labelLeft, labelTop))
+
+    val box = Box(
+        left = center.x - 18f * u,
+        top = min(center.y - 26f * u, labelTop - padY),
+        right = labelLeft + label.size.width + padX,
+        bottom = max(center.y + 12f * u, labelTop + label.size.height + padY),
+    )
+    return PlacedPeak(summit, center, label, box)
+}
+
+/**
+ * 向いている方位(画面の上)を示す視野。[apex] から前方へ扇形に広がり、遠くほど薄くなる。
+ * 双眼鏡と山頂アイコンで共通に使う。
+ */
+private fun DrawScope.drawViewCone(apex: Offset) {
+    val reach = 70.dp.toPx()
+    val halfAngle = 22f
+    drawArc(
+        brush = Brush.radialGradient(
+            colors = listOf(LensBlue.copy(alpha = 0.35f), LensBlue.copy(alpha = 0f)),
+            center = apex,
+            radius = reach,
+        ),
+        startAngle = -90f - halfAngle,
+        sweepAngle = halfAngle * 2,
+        useCenter = true,
+        topLeft = Offset(apex.x - reach, apex.y - reach),
+        size = Size(reach * 2, reach * 2),
+    )
+}
+
+/**
  * 現在地を表す双眼鏡。対物レンズを上(向いている方位)に向け、前方へ広がる視野を薄く描いて
  * 「前を覗いている」ように見せる。同心円や山と重なっても埋もれないよう、白い縁取りを付ける。
  */
@@ -288,23 +399,7 @@ private fun DrawScope.drawBinoculars(center: Offset) {
         part(0f, top = -1f, width = 8f, bottom = 6f, corner = 2f, color = color, grow = grow) // ブリッジ
     }
 
-    // 視野: 対物レンズの先から前方へ扇形に広がり、遠くほど薄くなる。
-    val apex = Offset(center.x, center.y - 10f * u)
-    val reach = 70f * u
-    val halfAngle = 22f
-    drawArc(
-        brush = Brush.radialGradient(
-            colors = listOf(LensBlue.copy(alpha = 0.35f), LensBlue.copy(alpha = 0f)),
-            center = apex,
-            radius = reach,
-        ),
-        startAngle = -90f - halfAngle,
-        sweepAngle = halfAngle * 2,
-        useCenter = true,
-        topLeft = Offset(apex.x - reach, apex.y - reach),
-        size = Size(reach * 2, reach * 2),
-    )
-
+    drawViewCone(Offset(center.x, center.y - 10f * u))
     body(Color.White, grow = 2f)
     body(BinocularBody, grow = 0f)
     drawCircle(BinocularHinge, radius = 3f * u, center = Offset(center.x, center.y + 2.5f * u))

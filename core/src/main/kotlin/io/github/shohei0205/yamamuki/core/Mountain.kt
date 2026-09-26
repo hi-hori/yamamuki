@@ -75,3 +75,13 @@ fun byteSizeText(bytes: Long): String = when {
     bytes < 1024 * 1024 -> "${Math.round(bytes / 1024.0)} KB"
     else -> String.format(java.util.Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
 }
+
+/**
+ * 現在地が山頂にいるとみなす水平距離。山頂に着いてから使う想定なので狭くとる
+ * (屋外の GPS の水平誤差 5〜20m に少し余裕を持たせた値)。標高は GPS の誤差が大きいので判定に使わない。
+ */
+const val SUMMIT_RADIUS_KM = 0.03
+
+/** 現在地から [radiusKm] 以内にある山のうち、いちばん近いもの。無ければ null。 */
+fun summitAt(mountains: List<NearbyMountain>, radiusKm: Double = SUMMIT_RADIUS_KM): NearbyMountain? =
+    mountains.filter { it.distanceKm <= radiusKm }.minByOrNull { it.distanceKm }

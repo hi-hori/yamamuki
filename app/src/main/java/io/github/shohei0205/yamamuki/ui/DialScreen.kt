@@ -117,6 +117,7 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
     var selectedId by remember { mutableStateOf<Long?>(null) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     val selected = state.mountains.firstOrNull { it.mountain.osmId == selectedId }
+        ?: state.summit?.takeIf { it.mountain.osmId == selectedId }
     // 取り直しで一覧から消えたら選択も解く。残しておくと、その山が一覧に戻ったときにダイアログが勝手に開く。
     val selectionLost = selectedId != null && selected == null
     LaunchedEffect(selectionLost) {
@@ -138,6 +139,7 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
             rangeKm = state.rangeKm,
             modifier = Modifier.fillMaxSize(),
             onMountainTap = { selectedId = it.mountain.osmId },
+            summit = state.summit,
             altitudeM = state.location?.mslAltitudeM,
             maxPeaks = state.settings.maxPeaks,
             textScale = state.settings.textScale,

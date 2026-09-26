@@ -11,6 +11,7 @@ import io.github.shohei0205.yamamuki.core.Mountain
 import io.github.shohei0205.yamamuki.core.NearbyMountain
 import io.github.shohei0205.yamamuki.core.displayPriority
 import io.github.shohei0205.yamamuki.core.meetsMinElevation
+import io.github.shohei0205.yamamuki.core.summitAt
 import io.github.shohei0205.yamamuki.data.CacheInfo
 import io.github.shohei0205.yamamuki.settings.Settings
 import kotlinx.coroutines.Job
@@ -36,6 +37,11 @@ data class DialUiState(
      * 設定の「表示する最低標高」で絞り込んだ後のもの。
      */
     val mountains: List<NearbyMountain> = emptyList(),
+    /**
+     * 現在地がほぼ山頂([io.github.shohei0205.yamamuki.core.SUMMIT_RADIUS_KM] 以内)のとき、その山。
+     * 最低標高の絞り込みとは関係なく探し、[mountains] からは除く(現在地の位置に別のアイコンで出す)。
+     */
+    val summit: NearbyMountain? = null,
     /** 現在地から画面上端までの距離。 */
     val rangeKm: Double = DialGeometry.DEFAULT_RANGE_KM,
     val loading: Boolean = false,
@@ -75,7 +81,7 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             newPoint
         }
-        _state.update { it.copy(location = point, mountains = relativeTo(point)) }
+        _state.update { it.copy(location = point).withPeaksAt(point) }
         val center = fetchedCenter
         if (center == null ||
             GeoMath.distanceKm(center.latitude, center.longitude, point.latitude, point.longitude) > REFETCH_DISTANCE_KM
@@ -101,7 +107,7 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(settings = after) }
 
         if (after.minElevationM != before.minElevationM) {
-            _state.value.location?.let { here -> _state.update { it.copy(mountains = relativeTo(here)) } }
+            _state.value.location?.let { here -> _state.update { it.withPeaksAt(here) } }
         }
         // 起動時の範囲を変えたら、試しやすいよう今の表示にもすぐ反映する。
         if (after.initialRangeKm != before.initialRangeKm) {
@@ -125,7 +131,7 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             cacheManager.clear()
             peaks = emptyList()
-            _state.update { it.copy(mountains = emptyList(), cacheInfo = cacheManager.info()) }
+            _state.update { it.copy(mountains = emptyList(), summit = null, cacheInfo = cacheManager.info()) }
             fetch()
         }
     }
@@ -152,8 +158,7 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
             result.error?.let { Log.w(TAG, "山データの取得に失敗\n${it.stackTraceToString()}") }
             peaks = result.mountains.map { it.mountain }
             _state.update {
-                it.copy(
-                    mountains = relativeTo(it.location ?: here),
+                it.withPeaksAt(it.location ?: here).copy(
                     loading = false,
                     offline = result.error != null,
                     incomplete = result.incomplete,
@@ -163,15 +168,23 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun relativeTo(p: GeoPoint): List<NearbyMountain> {
-        val minElevation = _state.value.settings.minElevationM
-        return peaks.filter { it.meetsMinElevation(minElevation) }.map {
+    /** [p] から見た山の一覧と、山頂にいるならその山を入れた状態。 */
+    private fun DialUiState.withPeaksAt(p: GeoPoint): DialUiState {
+        val all = peaks.map {
             NearbyMountain(
                 mountain = it,
                 distanceKm = GeoMath.distanceKm(p.latitude, p.longitude, it.latitude, it.longitude),
                 bearingDeg = GeoMath.bearingDeg(p.latitude, p.longitude, it.latitude, it.longitude),
             )
-        }.sortedWith(displayPriority)
+        }
+        val summit = summitAt(all)
+        val minElevation = settings.minElevationM
+        return copy(
+            mountains = all
+                .filter { it.mountain.osmId != summit?.mountain?.osmId && it.mountain.meetsMinElevation(minElevation) }
+                .sortedWith(displayPriority),
+            summit = summit,
+        )
     }
 
     private companion object {
