@@ -46,6 +46,19 @@
   & "C:\Program Files (x86)\Android\android-sdk\platform-tools\adb.exe" devices
   ```
 - 山データの取得に失敗したときは、原因を logcat にタグ `DialViewModel` で出している。
+- 開発版はアプリ ID が `io.github.shohei0205.yamamuki.debug`、名前が「山むき(開発版)」になり、配布版と同じ端末に並べて入れられる。
+
+## 配布版のビルド
+
+```bash
+# 署名済みの配布版 APK（app/build/outputs/apk/release/app-release.apk）
+./gradlew :app:assembleRelease
+```
+
+- 署名鍵は PC 内の `~/.android/yamamuki-release.jks` にあり、パスワードなどは `~/.android/yamamuki-release.properties` から読む（どちらも git に入れない）。場所は環境変数 `YAMAMUKI_SIGNING_PROPERTIES` で変えられる。このファイルが無ければ、署名なしでビルドする。
+- 更新版も同じ鍵で署名しないと、端末で上書きインストールできない。**鍵とパスワードのファイルは、PC とは別の場所にもバックアップしておく。**
+- 配布するときは `app/build.gradle.kts` の `versionCode`（毎回 1 つ増やす）と `versionName` を上げ、GitHub の Releases に APK を添付する。
+- 端末では Releases から APK をダウンロードし、「提供元不明のアプリ」のインストールを許可して入れる。リポジトリが非公開の間は、GitHub にログインしてリポジトリを見られる人だけがダウンロードできる。
 
 ## 方位盤の画面
 

@@ -6,3 +6,8 @@ local.properties
 *.iml
 .DS_Store
 captures/
+
+# リリース署名鍵(PC 内の ~/.android に置く。誤って入れないように)
+*.jks
+*.keystore
+*-release.properties
