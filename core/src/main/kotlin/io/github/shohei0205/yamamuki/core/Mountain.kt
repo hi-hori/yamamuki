@@ -16,3 +16,9 @@ data class NearbyMountain(
     val distanceKm: Double,
     val bearingDeg: Double,
 )
+
+/** 方位盤に出す表示名。「山名 (1,212m)」、標高不明なら山名のみ。 */
+fun Mountain.displayLabel(): String {
+    val ele = elevationM ?: return name
+    return String.format(java.util.Locale.US, "%s (%,dm)", name, Math.round(ele))
+}
