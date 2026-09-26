@@ -1,6 +1,7 @@
 package io.github.shohei0205.yamamuki.ui
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.shohei0205.yamamuki.YamamukiApp
@@ -69,6 +70,8 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
         fetchJob = viewModelScope.launch {
             _state.update { it.copy(loading = true) }
             val result = repository.mountainsAround(here.latitude, here.longitude, radius, forceRefresh)
+            // Log.w(tag, msg, tr) は UnknownHostException を含むと何も出さないので文字列にして渡す。
+            result.error?.let { Log.w(TAG, "山データの取得に失敗\n${it.stackTraceToString()}") }
             peaks = result.mountains.map { it.mountain }
             _state.update {
                 it.copy(
@@ -92,5 +95,7 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         /** これ以上移動したら取り直す。取得済みの地域ならキャッシュから読むだけで通信しない。 */
         const val REFETCH_DISTANCE_KM = 1.0
+
+        const val TAG = "DialViewModel"
     }
 }

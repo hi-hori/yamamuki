@@ -32,7 +32,8 @@ class OverpassClient(
 
     override suspend fun fetchPeaks(box: BoundingBox): List<Mountain> {
         val query = OverpassQuery.peaks(box)
-        var lastError: Throwable? = null
+        // どのエンドポイントがなぜ失敗したか追えるよう、すべての失敗を残す。
+        val errors = mutableListOf<Throwable>()
         for (endpoint in endpoints) {
             try {
                 val response = httpClient.submitForm(
@@ -42,17 +43,19 @@ class OverpassClient(
                     header(HttpHeaders.UserAgent, userAgent)
                 }
                 if (!response.status.isSuccess()) {
-                    lastError = OverpassException("HTTP ${response.status.value} from $endpoint")
+                    errors += OverpassException("HTTP ${response.status.value} from $endpoint")
                     continue
                 }
                 return OverpassParser.parse(response.bodyAsText())
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                lastError = e
+                errors += OverpassException("${e::class.simpleName} from $endpoint", e)
             }
         }
-        throw OverpassException("All Overpass endpoints failed", lastError)
+        throw OverpassException("All Overpass endpoints failed", errors.lastOrNull()).apply {
+            errors.dropLast(1).forEach(::addSuppressed)
+        }
     }
 
     companion object {

@@ -13,8 +13,12 @@ class YamamukiApp : Application() {
 
     val mountainRepository: MountainRepository by lazy {
         val http = HttpClient(OkHttp) {
+            // Overpass は集計が終わるまで応答を返さず 20 秒以上かかることがある。
+            // socketTimeout を指定しないと OkHttp 既定の 10 秒で読み込みが打ち切られる。
             install(HttpTimeout) {
                 requestTimeoutMillis = 90_000
+                connectTimeoutMillis = 15_000
+                socketTimeoutMillis = 75_000
             }
         }
         MountainRepository(
