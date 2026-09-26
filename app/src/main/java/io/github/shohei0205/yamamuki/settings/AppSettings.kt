@@ -22,6 +22,8 @@ data class Settings(
     val initialRangeKm: Int = DialGeometry.DEFAULT_RANGE_KM.toInt(),
     /** 取得した山データを取り直さずに使う日数。 */
     val cacheMaxAgeDays: Int = 30,
+    /** 初回起動時の「山データを自動で取得してよいか」に答えた。答えるまでは通信しない。 */
+    val networkConsentAsked: Boolean = false,
 ) {
     val cacheMaxAgeMillis: Long get() = cacheMaxAgeDays * 24L * 60 * 60 * 1000
 
@@ -51,6 +53,7 @@ class AppSettings(context: Context) {
             .putFloat(KEY_TEXT_SCALE, next.textScale)
             .putInt(KEY_INITIAL_RANGE, next.initialRangeKm)
             .putInt(KEY_CACHE_MAX_AGE, next.cacheMaxAgeDays)
+            .putBoolean(KEY_NETWORK_CONSENT_ASKED, next.networkConsentAsked)
             .apply()
     }
 
@@ -64,6 +67,8 @@ class AppSettings(context: Context) {
             textScale = prefs.getFloat(KEY_TEXT_SCALE, d.textScale),
             initialRangeKm = prefs.getInt(KEY_INITIAL_RANGE, d.initialRangeKm),
             cacheMaxAgeDays = prefs.getInt(KEY_CACHE_MAX_AGE, d.cacheMaxAgeDays),
+            // この項目を足す前から設定を変えて使っていた人(= 設定が保存済み)には、改めて聞かない。
+            networkConsentAsked = prefs.getBoolean(KEY_NETWORK_CONSENT_ASKED, prefs.contains(KEY_MANUAL_FETCH)),
         )
     }
 
@@ -75,5 +80,6 @@ class AppSettings(context: Context) {
         const val KEY_TEXT_SCALE = "text_scale"
         const val KEY_INITIAL_RANGE = "initial_range_km"
         const val KEY_CACHE_MAX_AGE = "cache_max_age_days"
+        const val KEY_NETWORK_CONSENT_ASKED = "network_consent_asked"
     }
 }

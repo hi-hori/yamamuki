@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -85,8 +86,10 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { granted -> hasPermission = granted.values.any { it } }
 
-    LaunchedEffect(Unit) {
-        if (!hasPermission) permissionLauncher.launch(LOCATION_PERMISSIONS)
+    // 初回は「山データを取得してよいか」を先に聞き、答えてから位置情報の許可を求める(ダイアログを重ねない)。
+    val consentAsked = state.settings.networkConsentAsked
+    LaunchedEffect(consentAsked) {
+        if (consentAsked && !hasPermission) permissionLauncher.launch(LOCATION_PERMISSIONS)
     }
     LaunchedEffect(hasPermission) {
         if (!hasPermission) return@LaunchedEffect
@@ -208,9 +211,35 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
         onDispose { view.keepScreenOn = false }
     }
 
+    if (!consentAsked) {
+        NetworkConsentDialog(onAnswer = viewModel::answerNetworkConsent)
+    }
+
     if (selected != null && !showSettings) {
         MountainDetailDialog(selected, onDismiss = { selectedId = null })
     }
+}
+
+/** 初回起動時に、山データを自動で取得してよいかを聞く。どちらかを選ぶまで閉じない。 */
+@Composable
+private fun NetworkConsentDialog(onAnswer: (Boolean) -> Unit) {
+    AlertDialog(
+        onDismissRequest = {},
+        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
+        title = { Text("山データの取得") },
+        text = {
+            Text(
+                "周辺の山の名前・位置・標高を、OpenStreetMap のサーバー（Overpass API）から取得します。" +
+                    "問い合わせには現在地の周辺の範囲が含まれます。" +
+                    "通信量は 1 回あたり数十 KB 程度で、取得したデータは端末に保存して繰り返し使います。\n\n" +
+                    "自動で取得してよいですか？\n" +
+                    "「いいえ」を選ぶと手動取得になり、画面左下の更新ボタンを押したときだけ通信します。" +
+                    "あとから設定を変更できます。",
+            )
+        },
+        confirmButton = { TextButton(onClick = { onAnswer(true) }) { Text("はい") } },
+        dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text("いいえ") } },
+    )
 }
 
 /** タップした山の詳細。 */
