@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -40,6 +41,10 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.shohei0205.yamamuki.core.Heading
 import io.github.shohei0205.yamamuki.core.HeadingFilter
+import io.github.shohei0205.yamamuki.core.NearbyMountain
+import io.github.shohei0205.yamamuki.core.coordinateText
+import io.github.shohei0205.yamamuki.core.distanceText
+import io.github.shohei0205.yamamuki.core.elevationText
 import io.github.shohei0205.yamamuki.sensor.locationUpdates
 import io.github.shohei0205.yamamuki.sensor.magneticHeadingUpdates
 import kotlinx.coroutines.flow.map
@@ -94,6 +99,10 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
     }
     val heading = magneticHeading?.let { Heading.normalize(it + declination) }
 
+    // 選んだ山は ID で持ち、表示中の一覧から引く。歩いて現在地が変わると距離も更新される。
+    var selectedId by remember { mutableStateOf<Long?>(null) }
+    val selected = state.mountains.firstOrNull { it.mountain.osmId == selectedId }
+
     Box(
         Modifier
             .fillMaxSize()
@@ -108,6 +117,7 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
             mountains = state.mountains,
             rangeKm = state.rangeKm,
             modifier = Modifier.fillMaxSize(),
+            onMountainTap = { selectedId = it.mountain.osmId },
         )
         Text(
             "© OpenStreetMap contributors",
@@ -128,6 +138,36 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 76.dp),
             )
         }
+    }
+
+    if (selected != null) {
+        MountainDetailDialog(selected, onDismiss = { selectedId = null })
+    }
+}
+
+/** タップした山の詳細。 */
+@Composable
+private fun MountainDetailDialog(nearby: NearbyMountain, onDismiss: () -> Unit) {
+    val m = nearby.mountain
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+        title = { Text(m.name) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DetailRow("標高", m.elevationText())
+                DetailRow("緯度経度", m.coordinateText())
+                DetailRow("現在地からの距離", distanceText(nearby.distanceKm))
+            }
+        },
+    )
+}
+
+@Composable
+private fun DetailRow(label: String, value: String) {
+    Column {
+        Text(label, style = MaterialTheme.typography.labelMedium)
+        Text(value, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
