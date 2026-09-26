@@ -5,11 +5,14 @@ import android.content.Context
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.location.altitude.AltitudeConverter
+import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import java.io.IOException
 
 /**
  * 現在地を流す。最初に端末が持っている直近の位置を流し、以降は GPS とネットワーク位置の更新を流す。
@@ -46,3 +49,21 @@ fun locationUpdates(context: Context): Flow<Location> = callbackFlow {
 
 private const val UPDATE_INTERVAL_MS = 5_000L
 private const val UPDATE_DISTANCE_M = 20f
+
+/**
+ * 現在地の標高(海抜, m)。GPS の altitude は楕円体からの高さで、日本では海抜より 30〜40m ほど高いため、
+ * Android 14 以降のジオイドモデル(AltitudeConverter)で海抜に直す。直せないとき(Android 13 以前、
+ * 高さを持たないネットワーク位置など)は null。ファイルを読むのでメインスレッドでは呼ばないこと。
+ */
+fun mslAltitudeM(context: Context, location: Location): Double? {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return null
+    if (location.hasMslAltitude()) return location.mslAltitudeMeters
+    if (!location.hasAltitude()) return null
+    return try {
+        val copy = Location(location)
+        AltitudeConverter().addMslAltitudeToLocation(context, copy)
+        if (copy.hasMslAltitude()) copy.mslAltitudeMeters else null
+    } catch (e: IOException) {
+        null
+    }
+}

@@ -18,6 +18,8 @@ data class MountainQueryResult(
     val incomplete: Boolean,
     /** 今回の通信で失敗した場合の原因。キャッシュで表示できていても設定される。 */
     val error: Throwable?,
+    /** 取り直すべきタイルがあったが、allowNetwork = false のため通信しなかった。 */
+    val networkSkipped: Boolean = false,
 )
 
 /**
@@ -35,6 +37,10 @@ class MountainRepository(
         longitude: Double,
         radiusKm: Double,
         forceRefresh: Boolean = false,
+        /** false ならキャッシュだけで返す(モバイル通信で取得を控えるときなど)。 */
+        allowNetwork: Boolean = true,
+        /** これより古いタイルは取り直す。 */
+        maxAgeMillis: Long = this.maxAgeMillis,
     ): MountainQueryResult {
         val box = BoundingBox.around(latitude, longitude, radiusKm)
         val tiles = Tile.covering(box)
@@ -47,7 +53,8 @@ class MountainRepository(
 
         var error: Throwable? = null
         var missing = tiles.filter { it !in fetched }
-        if (toFetch.isNotEmpty()) {
+        val networkSkipped = toFetch.isNotEmpty() && !allowNetwork
+        if (toFetch.isNotEmpty() && allowNetwork) {
             try {
                 val peaks = remote.fetchPeaks(Tile.union(toFetch))
                 val targets = toFetch.toSet()
@@ -71,7 +78,7 @@ class MountainRepository(
             .filter { it.distanceKm <= radiusKm }
             .sortedBy { it.distanceKm }
 
-        return MountainQueryResult(nearby, incomplete = missing.isNotEmpty(), error = error)
+        return MountainQueryResult(nearby, incomplete = missing.isNotEmpty(), error = error, networkSkipped = networkSkipped)
     }
 
     companion object {

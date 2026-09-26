@@ -18,19 +18,29 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -47,6 +57,9 @@ import io.github.shohei0205.yamamuki.core.distanceText
 import io.github.shohei0205.yamamuki.core.elevationText
 import io.github.shohei0205.yamamuki.sensor.locationUpdates
 import io.github.shohei0205.yamamuki.sensor.magneticHeadingUpdates
+import io.github.shohei0205.yamamuki.sensor.mslAltitudeM
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.map
 
 private val LOCATION_PERMISSIONS = arrayOf(
@@ -79,7 +92,8 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
         if (!hasPermission) return@LaunchedEffect
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             locationUpdates(context).collect {
-                viewModel.onLocation(GeoPoint(it.latitude, it.longitude, it.altitude))
+                val msl = withContext(Dispatchers.IO) { mslAltitudeM(context, it) }
+                viewModel.onLocation(GeoPoint(it.latitude, it.longitude, it.altitude, msl))
             }
         }
     }
@@ -101,6 +115,7 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
 
     // 選んだ山は ID で持ち、表示中の一覧から引く。歩いて現在地が変わると距離も更新される。
     var selectedId by remember { mutableStateOf<Long?>(null) }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     val selected = state.mountains.firstOrNull { it.mountain.osmId == selectedId }
     // 取り直しで一覧から消えたら選択も解く。残しておくと、その山が一覧に戻ったときにダイアログが勝手に開く。
     val selectionLost = selectedId != null && selected == null
@@ -123,6 +138,9 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
             rangeKm = state.rangeKm,
             modifier = Modifier.fillMaxSize(),
             onMountainTap = { selectedId = it.mountain.osmId },
+            altitudeM = state.location?.mslAltitudeM,
+            maxPeaks = state.settings.maxPeaks,
+            textScale = state.settings.textScale,
         )
         Text(
             "© OpenStreetMap contributors",
@@ -138,14 +156,57 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
         } else {
             StatusLine(
                 message = statusMessage(state, headingAvailable = heading != null),
-                showRetry = state.offline && !state.loading,
-                onRetry = viewModel::retry,
+                // 手動取得モードでは左下の更新ボタンで取り直すので、ここには出さない。
+                actionLabel = if (state.offline && !state.loading && !state.settings.manualFetch) "再取得" else null,
+                onAction = viewModel::retry,
                 modifier = Modifier.align(Alignment.TopCenter).padding(top = 76.dp),
+            )
+        }
+
+        // 左下: 設定と、手動取得モードなら山データの取得。屋外で押しやすいよう既定(40dp)より大きくする。
+        Row(
+            Modifier.align(Alignment.BottomStart).padding(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            FilledTonalIconButton(onClick = { showSettings = true }, modifier = Modifier.size(52.dp)) {
+                Icon(Icons.Filled.Settings, contentDescription = "設定", Modifier.size(28.dp))
+            }
+            if (hasPermission && state.settings.manualFetch) {
+                FilledTonalIconButton(
+                    onClick = viewModel::fetchManually,
+                    enabled = state.location != null && !state.loading,
+                    modifier = Modifier.size(52.dp),
+                ) {
+                    if (state.loading) {
+                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
+                    } else {
+                        Icon(Icons.Filled.Refresh, contentDescription = "山データを取得", Modifier.size(28.dp))
+                    }
+                }
+            }
+        }
+
+        if (showSettings) {
+            SettingsScreen(
+                settings = state.settings,
+                cacheInfo = state.cacheInfo,
+                onSettingsChange = viewModel::updateSettings,
+                onOpen = viewModel::refreshCacheInfo,
+                onClearCache = viewModel::clearCache,
+                onClose = { showSettings = false },
             )
         }
     }
 
-    if (selected != null) {
+    // 屋外で山を見比べている間に画面が消えないようにする(設定で選んだときだけ)。
+    val view = LocalView.current
+    val keepScreenOn = state.settings.keepScreenOn
+    DisposableEffect(view, keepScreenOn) {
+        view.keepScreenOn = keepScreenOn
+        onDispose { view.keepScreenOn = false }
+    }
+
+    if (selected != null && !showSettings) {
         MountainDetailDialog(selected, onDismiss = { selectedId = null })
     }
 }
@@ -182,18 +243,24 @@ private fun statusMessage(state: DialUiState, headingAvailable: Boolean): String
     state.loading -> "山のデータを取得中…"
     state.offline && state.incomplete -> "通信できず、この付近の山データがありません"
     state.offline -> "オフライン: 保存済みのデータを表示中"
+    state.settings.manualFetch && state.incomplete -> "この付近の山データがありません。左下の更新ボタンで取得できます"
     else -> null
 }
 
 @Composable
-private fun StatusLine(message: String?, showRetry: Boolean, onRetry: () -> Unit, modifier: Modifier = Modifier) {
+private fun StatusLine(
+    message: String?,
+    actionLabel: String?,
+    onAction: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     if (message == null) return
     Row(
         modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(message, style = MaterialTheme.typography.bodySmall)
-        if (showRetry) TextButton(onClick = onRetry) { Text("再取得") }
+        if (actionLabel != null) TextButton(onClick = onAction) { Text(actionLabel) }
     }
 }
 

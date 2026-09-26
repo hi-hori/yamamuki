@@ -58,3 +58,20 @@ fun distanceText(distanceKm: Double): String =
     } else {
         String.format(java.util.Locale.US, "%,.1f km", distanceKm)
     }
+
+/**
+ * 標高が [minElevationM] 以上の山だけにする。0 以下なら絞り込まない。
+ * 絞り込むときは、標高が不明な山は基準を満たすか分からないので除く。
+ */
+fun Mountain.meetsMinElevation(minElevationM: Int): Boolean {
+    if (minElevationM <= 0) return true
+    val ele = elevationM ?: return false
+    return ele >= minElevationM
+}
+
+/** キャッシュ容量の表示。「820 KB」「1.3 MB」。 */
+fun byteSizeText(bytes: Long): String = when {
+    bytes < 1024 -> "$bytes B"
+    bytes < 1024 * 1024 -> "${Math.round(bytes / 1024.0)} KB"
+    else -> String.format(java.util.Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+}

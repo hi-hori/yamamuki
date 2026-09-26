@@ -56,6 +56,24 @@ interface MountainDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTiles(tiles: List<FetchedTileEntity>)
 
+    @Query("SELECT COUNT(*) FROM mountains")
+    suspend fun countMountains(): Int
+
+    @Query("SELECT COUNT(*) FROM fetched_tiles")
+    suspend fun countTiles(): Int
+
+    @Query("DELETE FROM mountains")
+    suspend fun deleteAllMountains()
+
+    @Query("DELETE FROM fetched_tiles")
+    suspend fun deleteAllTiles()
+
+    @Transaction
+    suspend fun clearAll() {
+        deleteAllMountains()
+        deleteAllTiles()
+    }
+
     @Transaction
     suspend fun replaceTiles(tiles: List<FetchedTileEntity>, mountains: List<MountainEntity>) {
         tiles.forEach { deleteMountainsInTile(it.tileLat, it.tileLon) }
@@ -69,7 +87,9 @@ abstract class MountainDatabase : RoomDatabase() {
     abstract fun mountainDao(): MountainDao
 
     companion object {
+        const val FILE_NAME = "mountains.db"
+
         fun create(context: Context): MountainDatabase =
-            Room.databaseBuilder(context, MountainDatabase::class.java, "mountains.db").build()
+            Room.databaseBuilder(context, MountainDatabase::class.java, FILE_NAME).build()
     }
 }

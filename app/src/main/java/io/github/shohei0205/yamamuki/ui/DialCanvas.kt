@@ -56,12 +56,15 @@ private val LensBlue = Color(0xFF5B8DB8)
 /** 画面上部の方位目盛りに収める角度の幅。 */
 private const val TAPE_SPAN_DEG = 60.0
 
-/** 一度に表示する山の上限。 */
-private const val MAX_PEAKS = 40
-
-private val LabelStyle = TextStyle(color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-private val RingLabelStyle = TextStyle(color = RingGray, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-private val ReadoutStyle = TextStyle(color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+/**
+ * 方位盤の文字。設定の文字サイズ([scale])を山名・距離の目盛り・方位の表示に掛ける。
+ * 上端の方位目盛りは高さが決まっているので倍率を掛けない。
+ */
+private class DialTextStyles(scale: Float) {
+    val label = TextStyle(color = Color.Black, fontSize = 13.sp * scale, fontWeight = FontWeight.Bold)
+    val ringLabel = TextStyle(color = RingGray, fontSize = 12.sp * scale, fontWeight = FontWeight.Bold)
+    val readout = TextStyle(color = Color.Black, fontSize = 15.sp * scale, fontWeight = FontWeight.Bold)
+}
 
 /**
  * 方位盤。現在地(画面下部の双眼鏡)から向いている方向を上にとり、山をアイコンと山名で描く。
@@ -76,7 +79,14 @@ fun DialCanvas(
     rangeKm: Double,
     modifier: Modifier = Modifier,
     onMountainTap: (NearbyMountain) -> Unit = {},
+    /** 現在地の標高(海抜)。方位の表示の後ろに添える。null なら出さない。 */
+    altitudeM: Double? = null,
+    /** 一度に表示する山の上限。 */
+    maxPeaks: Int = 40,
+    /** 文字の大きさ(標準 = 1.0 に対する倍率)。 */
+    textScale: Float = 1f,
 ) {
+    val styles = remember(textScale) { DialTextStyles(textScale) }
     val textMeasurer = rememberTextMeasurer(cacheSize = 256)
     val hitTargets = remember { HitTargets() }
     val currentOnTap by rememberUpdatedState(onMountainTap)
@@ -91,14 +101,14 @@ fun DialCanvas(
         val observer = Offset(size.width / 2, size.height - 52.dp.toPx())
         val pxPerKm = ((observer.y - chartTop) / rangeKm).toFloat()
         hitTargets.peaks = if (pxPerKm > 0f) {
-            drawRings(observer, pxPerKm, rangeKm, chartTop, textMeasurer)
-            drawPeaks(observer, pxPerKm, headingDeg, mountains, chartTop, textMeasurer)
+            drawRings(observer, pxPerKm, rangeKm, chartTop, textMeasurer, styles)
+            drawPeaks(observer, pxPerKm, headingDeg, mountains, chartTop, textMeasurer, styles, maxPeaks)
         } else {
             emptyList()
         }
         drawBinoculars(observer)
         drawTape(headingDeg, tapeHeight, textMeasurer)
-        drawReadout(headingDeg, tapeHeight, textMeasurer)
+        drawReadout(headingDeg, altitudeM, tapeHeight, textMeasurer, styles)
     }
 }
 
@@ -108,6 +118,7 @@ private fun DrawScope.drawRings(
     rangeKm: Double,
     chartTop: Float,
     textMeasurer: TextMeasurer,
+    styles: DialTextStyles,
 ) {
     val step = DialGeometry.ringStepKm(rangeKm)
     val farthestPx = hypot(size.width / 2, observer.y)
@@ -116,7 +127,7 @@ private fun DrawScope.drawRings(
         val km = step * i
         val radius = (km * pxPerKm).toFloat()
         drawCircle(RingGray, radius = radius, center = observer, style = Stroke(width = 3.dp.toPx()))
-        val label = textMeasurer.measure(DialGeometry.ringLabel(km), RingLabelStyle)
+        val label = textMeasurer.measure(DialGeometry.ringLabel(km), styles.ringLabel)
         val y = observer.y - radius - label.size.height - 2.dp.toPx()
         if (y >= chartTop) drawText(label, topLeft = Offset(observer.x - label.size.width / 2f, y))
         i++
@@ -149,6 +160,8 @@ private fun DrawScope.drawPeaks(
     mountains: List<NearbyMountain>,
     chartTop: Float,
     textMeasurer: TextMeasurer,
+    styles: DialTextStyles,
+    maxPeaks: Int,
 ): List<PlacedPeak> {
     val gap = 2.dp.toPx()
 
@@ -161,7 +174,7 @@ private fun DrawScope.drawPeaks(
         .map { (m, p) ->
             val icon = PeakIcon.of(m.mountain.elevationClass())
             val halfWidth = icon.halfWidthDp.dp.toPx()
-            val label = textMeasurer.measure(m.mountain.name, LabelStyle)
+            val label = textMeasurer.measure(m.mountain.name, styles.label)
             val labelHalf = label.size.width / 2f
             val box = Box(
                 left = min(p.x - halfWidth, p.x - labelHalf),
@@ -173,7 +186,7 @@ private fun DrawScope.drawPeaks(
         }
         .toList()
 
-    val placed = declutter(visible, limit = MAX_PEAKS) { it.box }
+    val placed = declutter(visible, limit = maxPeaks) { it.box }
 
     for (peak in placed) {
         val p = peak.position
@@ -329,8 +342,14 @@ private fun DrawScope.drawTape(headingDeg: Double, tapeHeight: Float, textMeasur
     }
 }
 
-/** 目盛りの下に、中央を指す赤い印と「北東 45°」の表示。 */
-private fun DrawScope.drawReadout(headingDeg: Double, tapeHeight: Float, textMeasurer: TextMeasurer) {
+/** 目盛りの下に、中央を指す赤い印と「北東 45°　標高 312m」の表示(標高は分かるときだけ)。 */
+private fun DrawScope.drawReadout(
+    headingDeg: Double,
+    altitudeM: Double?,
+    tapeHeight: Float,
+    textMeasurer: TextMeasurer,
+    styles: DialTextStyles,
+) {
     val center = size.width / 2
     val caret = 6.dp.toPx()
     val path = Path().apply {
@@ -341,7 +360,8 @@ private fun DrawScope.drawReadout(headingDeg: Double, tapeHeight: Float, textMea
     }
     drawPath(path, NorthRed)
     val deg = headingDeg.roundToInt() % 360
-    val label = textMeasurer.measure("${Heading.directionName(headingDeg)} $deg°", ReadoutStyle)
+    val altitude = altitudeM?.let { String.format(java.util.Locale.US, "　標高 %,dm", Math.round(it)) } ?: ""
+    val label = textMeasurer.measure("${Heading.directionName(headingDeg)} $deg°$altitude", styles.readout)
     drawText(label, topLeft = Offset(center - label.size.width / 2f, tapeHeight + caret + 2.dp.toPx()))
 }
 

@@ -24,4 +24,20 @@ class MountainTextTest {
         assertEquals("12.3 km", distanceText(12.34))
         assertEquals("1,234.6 km", distanceText(1234.56))
     }
+
+    @Test
+    fun minElevationFilter() {
+        assertEquals(true, fuji.meetsMinElevation(0))
+        assertEquals(true, fuji.copy(elevationM = null).meetsMinElevation(0))
+        assertEquals(true, fuji.meetsMinElevation(3776))
+        assertEquals(false, fuji.meetsMinElevation(3800))
+        assertEquals(false, fuji.copy(elevationM = null).meetsMinElevation(100))
+    }
+
+    @Test
+    fun byteSize() {
+        assertEquals("512 B", byteSizeText(512))
+        assertEquals("820 KB", byteSizeText(820L * 1024))
+        assertEquals("1.3 MB", byteSizeText(1_363_149))
+    }
 }

@@ -97,4 +97,35 @@ class MountainRepositoryTest {
         cachedTiles.forEach { assertEquals(1_000_000L, cache.tiles[it]) }
         assertTrue(cache.tiles.size > cachedTiles.size)
     }
+
+    @Test
+    fun skipsNetworkWhenNotAllowed() = runTest {
+        val remote = FakeRemote(listOf(fuji, near))
+        val cache = InMemoryMountainCache()
+        val repo = repo(remote, cache)
+
+        val result = repo.mountainsAround(here.first, here.second, 50.0, allowNetwork = false)
+        assertEquals(0, remote.calls.size)
+        assertTrue(result.networkSkipped)
+        assertTrue(result.incomplete)
+        assertNull(result.error)
+
+        // 取得済みなら通信を控えていても表示でき、控えた扱いにもならない。
+        repo.mountainsAround(here.first, here.second, 50.0)
+        val cached = repo.mountainsAround(here.first, here.second, 50.0, allowNetwork = false)
+        assertEquals(listOf("岩殿山", "富士山"), cached.mountains.map { it.mountain.name })
+        assertFalse(cached.networkSkipped)
+    }
+
+    @Test
+    fun maxAgeCanBeGivenPerCall() = runTest {
+        val remote = FakeRemote(listOf(fuji))
+        val repo = repo(remote, InMemoryMountainCache())
+        repo.mountainsAround(here.first, here.second, 50.0)
+        now += 5000 // 既定の 1000ms は過ぎているが、10000ms 以内
+        repo.mountainsAround(here.first, here.second, 50.0, maxAgeMillis = 10_000)
+        assertEquals(1, remote.calls.size)
+        repo.mountainsAround(here.first, here.second, 50.0)
+        assertEquals(2, remote.calls.size)
+    }
 }
