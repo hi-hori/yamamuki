@@ -19,6 +19,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawStyle
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextLayoutResult
@@ -49,6 +51,7 @@ private val PeakGreen = Color(0xFF22B14C)
 private val PeakYellow = Color(0xFFB5E61D)
 private val HillGreen = Color(0xFF9BD65A)
 private val PeakBrown = Color(0xFF8C5A2B)
+private val PeakBrownDark = Color(0xFF5E3A17)
 private val SnowWhite = Color(0xFFFFFFFF)
 private val NorthRed = Color(0xFFED1C24)
 private val BinocularBody = Color(0xFF333333)
@@ -218,10 +221,10 @@ private enum class PeakIcon(val halfWidthDp: Float, val heightDp: Float) {
     /** 1000m 未満(標高不明を含む): 黄緑の低い丘。 */
     HILL(halfWidthDp = 10f, heightDp = 11f),
 
-    /** 1000m 以上 2000m 未満: 緑の ▲ に黄色の小 ▲。 */
+    /** 1000m 以上 2000m 未満: 黄色の ▲ を緑で縁取る。 */
     PEAK(halfWidthDp = 11f, heightDp = 18f),
 
-    /** 2000m 以上: 茶色の高く尖った ▲ に白い雪の冠。 */
+    /** 2000m 以上: 茶色の高く尖った ▲ に白い雪の冠。濃い茶色で縁取る。 */
     ALPINE(halfWidthDp = 12f, heightDp = 25f),
     ;
 
@@ -239,6 +242,8 @@ private enum class PeakIcon(val halfWidthDp: Float, val heightDp: Float) {
 private fun DrawScope.drawPeakIcon(p: Offset, icon: PeakIcon) {
     val halfWidth = icon.halfWidthDp.dp.toPx()
     val height = icon.heightDp.dp.toPx()
+    // 3 種類とも同じ太さの縁取りにそろえる。
+    val outline = Stroke(width = OUTLINE_WIDTH.toPx())
     when (icon) {
         PeakIcon.HILL -> {
             // 底辺を直径とする半楕円。縁取りで背景のベージュから浮かせる。
@@ -252,31 +257,41 @@ private fun DrawScope.drawPeakIcon(p: Offset, icon: PeakIcon) {
                 useCenter = true,
                 topLeft = topLeft,
                 size = oval,
-                style = Stroke(width = 1.5f.dp.toPx()),
+                style = outline,
             )
         }
         PeakIcon.PEAK -> {
-            drawTriangle(p, halfWidth, height, PeakGreen)
-            drawTriangle(Offset(p.x, p.y - height * 0.14f), halfWidth * 0.45f, height * 0.45f, PeakYellow)
+            drawTriangle(p, halfWidth, height, PeakYellow)
+            drawTriangle(p, halfWidth, height, PeakGreen, outline)
         }
         PeakIcon.ALPINE -> {
             drawTriangle(p, halfWidth, height, PeakBrown)
             // 頂上から高さの 35% を白く塗って雪を表す。相似な三角形なので幅も同じ比率。
             val snow = 0.35f
             drawTriangle(Offset(p.x, p.y - height * (1 - snow)), halfWidth * snow, height * snow, SnowWhite)
+            drawTriangle(p, halfWidth, height, PeakBrownDark, outline)
         }
     }
 }
 
-/** 底辺の中点を [bottomCenter] とする二等辺三角形。 */
-private fun DrawScope.drawTriangle(bottomCenter: Offset, halfWidth: Float, height: Float, color: Color) {
+/** 山アイコンの縁取りの太さ。 */
+private val OUTLINE_WIDTH = 1.5.dp
+
+/** 底辺の中点を [bottomCenter] とする二等辺三角形。[style] を渡すと線で描く。 */
+private fun DrawScope.drawTriangle(
+    bottomCenter: Offset,
+    halfWidth: Float,
+    height: Float,
+    color: Color,
+    style: DrawStyle = Fill,
+) {
     val path = Path().apply {
         moveTo(bottomCenter.x, bottomCenter.y - height)
         lineTo(bottomCenter.x + halfWidth, bottomCenter.y)
         lineTo(bottomCenter.x - halfWidth, bottomCenter.y)
         close()
     }
-    drawPath(path, color)
+    drawPath(path, color, style = style)
 }
 
 /**
