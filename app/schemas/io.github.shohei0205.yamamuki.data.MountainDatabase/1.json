@@ -1,0 +1,119 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "899e4ea8477eb015a6c95c8100a4d452",
+    "entities": [
+      {
+        "tableName": "mountains",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`osmId` INTEGER NOT NULL, `name` TEXT NOT NULL, `latitude` REAL NOT NULL, `longitude` REAL NOT NULL, `elevationM` REAL, `tileLat` INTEGER NOT NULL, `tileLon` INTEGER NOT NULL, PRIMARY KEY(`osmId`))",
+        "fields": [
+          {
+            "fieldPath": "osmId",
+            "columnName": "osmId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latitude",
+            "columnName": "latitude",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "longitude",
+            "columnName": "longitude",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "elevationM",
+            "columnName": "elevationM",
+            "affinity": "REAL"
+          },
+          {
+            "fieldPath": "tileLat",
+            "columnName": "tileLat",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tileLon",
+            "columnName": "tileLon",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "osmId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_mountains_latitude_longitude",
+            "unique": false,
+            "columnNames": [
+              "latitude",
+              "longitude"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_mountains_latitude_longitude` ON `${TABLE_NAME}` (`latitude`, `longitude`)"
+          },
+          {
+            "name": "index_mountains_tileLat_tileLon",
+            "unique": false,
+            "columnNames": [
+              "tileLat",
+              "tileLon"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_mountains_tileLat_tileLon` ON `${TABLE_NAME}` (`tileLat`, `tileLon`)"
+          }
+        ]
+      },
+      {
+        "tableName": "fetched_tiles",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`tileLat` INTEGER NOT NULL, `tileLon` INTEGER NOT NULL, `fetchedAtMillis` INTEGER NOT NULL, PRIMARY KEY(`tileLat`, `tileLon`))",
+        "fields": [
+          {
+            "fieldPath": "tileLat",
+            "columnName": "tileLat",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tileLon",
+            "columnName": "tileLon",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fetchedAtMillis",
+            "columnName": "fetchedAtMillis",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "tileLat",
+            "tileLon"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '899e4ea8477eb015a6c95c8100a4d452')"
+    ]
+  }
+}
