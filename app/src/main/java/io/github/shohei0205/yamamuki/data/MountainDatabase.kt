@@ -1,0 +1,75 @@
+package io.github.shohei0205.yamamuki.data
+
+import android.content.Context
+import androidx.room.Dao
+import androidx.room.Database
+import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.PrimaryKey
+import androidx.room.Query
+import androidx.room.Room
+import androidx.room.RoomDatabase
+import androidx.room.Transaction
+
+@Entity(
+    tableName = "mountains",
+    indices = [Index("latitude", "longitude"), Index("tileLat", "tileLon")],
+)
+data class MountainEntity(
+    @PrimaryKey val osmId: Long,
+    val name: String,
+    val latitude: Double,
+    val longitude: Double,
+    val elevationM: Double?,
+    val tileLat: Int,
+    val tileLon: Int,
+)
+
+/** Overpass から取得済みのタイルと取得時刻。山が0件のタイルも記録してオフライン時に再取得しない。 */
+@Entity(tableName = "fetched_tiles", primaryKeys = ["tileLat", "tileLon"])
+data class FetchedTileEntity(
+    val tileLat: Int,
+    val tileLon: Int,
+    val fetchedAtMillis: Long,
+)
+
+@Dao
+interface MountainDao {
+    @Query(
+        "SELECT * FROM mountains WHERE latitude BETWEEN :south AND :north AND longitude BETWEEN :west AND :east"
+    )
+    suspend fun mountainsIn(south: Double, west: Double, north: Double, east: Double): List<MountainEntity>
+
+    @Query(
+        "SELECT * FROM fetched_tiles WHERE tileLat BETWEEN :minLat AND :maxLat AND tileLon BETWEEN :minLon AND :maxLon"
+    )
+    suspend fun tilesIn(minLat: Int, maxLat: Int, minLon: Int, maxLon: Int): List<FetchedTileEntity>
+
+    @Query("DELETE FROM mountains WHERE tileLat = :tileLat AND tileLon = :tileLon")
+    suspend fun deleteMountainsInTile(tileLat: Int, tileLon: Int)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertMountains(mountains: List<MountainEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTiles(tiles: List<FetchedTileEntity>)
+
+    @Transaction
+    suspend fun replaceTiles(tiles: List<FetchedTileEntity>, mountains: List<MountainEntity>) {
+        tiles.forEach { deleteMountainsInTile(it.tileLat, it.tileLon) }
+        insertMountains(mountains)
+        insertTiles(tiles)
+    }
+}
+
+@Database(entities = [MountainEntity::class, FetchedTileEntity::class], version = 1)
+abstract class MountainDatabase : RoomDatabase() {
+    abstract fun mountainDao(): MountainDao
+
+    companion object {
+        fun create(context: Context): MountainDatabase =
+            Room.databaseBuilder(context, MountainDatabase::class.java, "mountains.db").build()
+    }
+}
