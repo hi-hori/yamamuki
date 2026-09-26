@@ -2,20 +2,20 @@ package io.github.shohei0205.yamamuki.core
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
 class OverpassParserTest {
     @Test
     fun parsesNamedNodes() {
-        val body = """
-            {"version":0.6,"elements":[
-              {"type":"node","id":1,"lat":35.3606,"lon":138.7274,"tags":{"natural":"volcano","name":"富士山","ele":"3776"}},
-              {"type":"node","id":2,"lat":35.0,"lon":138.0,"tags":{"natural":"peak","name":"Mt. X","name:ja":"エックス山","ele":"1,234 m"}},
-              {"type":"node","id":3,"lat":35.1,"lon":138.1,"tags":{"natural":"peak"}},
-              {"type":"node","id":4,"lat":35.2,"lon":138.2,"tags":{"natural":"peak","name":"無標高山"}},
-              {"type":"way","id":5,"tags":{"name":"way"}}
-            ]}
-        """.trimIndent()
+        val body = listOf(
+            "@id\t@lat\t@lon\tname\tname:ja\tele",
+            "1\t35.3606\t138.7274\t富士山\t\t3776",
+            "2\t35.0\t138.0\tMt. X\tエックス山\t1,234 m",
+            "3\t35.1\t138.1\t\t\t",
+            "4\t35.2\t138.2\t無標高山\t\t",
+            "1\t35.3606\t138.7274\t富士山\t\t3776",
+        ).joinToString("\n", postfix = "\n")
 
         val result = OverpassParser.parse(body)
 
@@ -27,6 +27,30 @@ class OverpassParserTest {
             ),
             result,
         )
+    }
+
+    @Test
+    fun skipsBrokenLines() {
+        // 値に改行が入ると 1 件が 2 行に割れて列数が合わなくなる。
+        val body = listOf(
+            "@id\t@lat\t@lon\tname\tname:ja\tele",
+            "5\t35.5\t138.5\t改行",
+            "山\t\t500",
+            "6\t35.6\t138.6\t正常山\t\t600",
+        ).joinToString("\n")
+
+        assertEquals(listOf(Mountain(6, "正常山", 35.6, 138.6, 600.0)), OverpassParser.parse(body))
+    }
+
+    @Test
+    fun parsesEmptyResult() {
+        assertEquals(emptyList(), OverpassParser.parse("@id\t@lat\t@lon\tname\tname:ja\tele\n"))
+        assertEquals(emptyList(), OverpassParser.parse(""))
+    }
+
+    @Test
+    fun rejectsUnexpectedFormat() {
+        assertFailsWith<OverpassException> { OverpassParser.parse("""{"elements":[]}""") }
     }
 
     @Test
@@ -43,6 +67,6 @@ class OverpassParserTest {
     fun queryUsesBboxOrder() {
         val q = OverpassQuery.peaks(BoundingBox(35.0, 138.0, 36.0, 139.0))
         kotlin.test.assertContains(q, """node["natural"="peak"]["name"](35.00000,138.00000,36.00000,139.00000);""")
-        kotlin.test.assertContains(q, "[out:json]")
+        kotlin.test.assertContains(q, """[out:csv(::id,::lat,::lon,name,"name:ja",ele;true;"\t")]""")
     }
 }

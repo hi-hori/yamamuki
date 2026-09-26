@@ -8,9 +8,6 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import io.ktor.http.parameters
 import kotlinx.coroutines.CancellationException
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import java.util.Locale
 
 /** 山データの取得元。テストではフェイクに差し替える。 */
@@ -67,48 +64,64 @@ class OverpassClient(
 }
 
 object OverpassQuery {
+    /** 返してもらう列。[OverpassParser] はこの見出しで列を探す。 */
+    internal val CSV_COLUMNS = listOf("::id", "::lat", "::lon", "name", "\"name:ja\"", "ele")
+
+    /**
+     * 山頂ノードを、使う項目だけのタブ区切り(見出し行付き)で返させる。
+     * JSON (out body) だと出典・コメントなど不要なタグまで届くため、通信量が gzip 後でも 4 割ほど多い。
+     */
     fun peaks(box: BoundingBox, timeoutSec: Int = 60): String {
         val bbox = listOf(box.south, box.west, box.north, box.east)
             .joinToString(",") { String.format(Locale.US, "%.5f", it) }
         return """
-            [out:json][timeout:$timeoutSec];
+            [out:csv(${CSV_COLUMNS.joinToString(",")};true;"\t")][timeout:$timeoutSec];
             (
               node["natural"="peak"]["name"]($bbox);
               node["natural"="volcano"]["name"]($bbox);
             );
-            out body;
+            out;
         """.trimIndent()
     }
 }
 
 object OverpassParser {
-    private val json = Json { ignoreUnknownKeys = true }
+    /**
+     * [OverpassQuery.peaks] の応答(タブ区切り、1 行目が "@id  @lat  @lon  name  name:ja  ele" の見出し)を読む。
+     * 値に改行を含むなどで列数が合わない行は読み飛ばす。
+     */
+    fun parse(body: String): List<Mountain> {
+        val lines = body.lineSequence().filter { it.isNotBlank() }.iterator()
+        if (!lines.hasNext()) return emptyList()
+        val header = lines.next().split('\t')
+        fun column(name: String): Int {
+            val i = header.indexOf(name)
+            if (i < 0) throw OverpassException("Overpass の応答に列 $name がありません: ${header.joinToString(" ")}")
+            return i
+        }
+        val id = column("@id")
+        val lat = column("@lat")
+        val lon = column("@lon")
+        val name = column("name")
+        val nameJa = column("name:ja")
+        val ele = column("ele")
 
-    @Serializable
-    private data class Response(val elements: List<Element> = emptyList())
-
-    @Serializable
-    private data class Element(
-        val type: String,
-        val id: Long,
-        val lat: Double? = null,
-        val lon: Double? = null,
-        val tags: Map<String, String> = emptyMap(),
-    )
-
-    fun parse(body: String): List<Mountain> =
-        json.decodeFromString<Response>(body).elements.mapNotNull { e ->
-            if (e.type != "node" || e.lat == null || e.lon == null) return@mapNotNull null
-            val name = (e.tags["name:ja"] ?: e.tags["name"])?.trim()
-            if (name.isNullOrEmpty()) return@mapNotNull null
-            Mountain(
-                osmId = e.id,
-                name = name,
-                latitude = e.lat,
-                longitude = e.lon,
-                elevationM = parseElevation(e.tags["ele"]),
+        val mountains = mutableListOf<Mountain>()
+        for (line in lines) {
+            val cells = line.split('\t')
+            if (cells.size != header.size) continue
+            val displayName = cells[nameJa].trim().ifEmpty { cells[name].trim() }
+            if (displayName.isEmpty()) continue
+            mountains += Mountain(
+                osmId = cells[id].toLongOrNull() ?: continue,
+                name = displayName,
+                latitude = cells[lat].toDoubleOrNull() ?: continue,
+                longitude = cells[lon].toDoubleOrNull() ?: continue,
+                elevationM = parseElevation(cells[ele].ifEmpty { null }),
             )
-        }.distinctBy { it.osmId }
+        }
+        return mountains.distinctBy { it.osmId }
+    }
 
     /**
      * ele タグを m 単位の数値にする。"3776", "3776 m", "3,776", "3776;3775", "12345 ft" などに対応。

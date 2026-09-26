@@ -14,7 +14,7 @@ import kotlin.test.assertTrue
 
 class OverpassClientTest {
     private val box = BoundingBox(35.0, 138.0, 36.0, 139.0)
-    private val okBody = """{"elements":[{"type":"node","id":1,"lat":35.36,"lon":138.73,"tags":{"name":"富士山","ele":"3776"}}]}"""
+    private val okBody = "@id\t@lat\t@lon\tname\tname:ja\tele\n1\t35.36\t138.73\t富士山\t\t3776\n"
 
     @Test
     fun postsQueryAndParses() = runTest {
