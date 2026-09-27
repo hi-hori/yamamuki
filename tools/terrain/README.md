@@ -109,3 +109,8 @@ build/terrain-venv/Scripts/python tools/terrain/sea_tiles.py --offline --output 
 
 先に陰影パックを生成して、そのときのDEMキャッシュを指定する。
 地形素材を更新した場合は海ポリゴンも再生成する。元の陰影・水面・河川データは保持する。
+
+地形パックの実体は [yamamuki-data](https://github.com/hi-hori/yamamuki-data) のGit LFSに保存する。
+ソースコードの送信先は `hi-hori/yamamuki`。ルートの `.lfsconfig` により、
+clone・`git lfs pull`・push時のLFS転送先だけをデータ用リポジトリへ切り替える。
+データを更新してpushするには、データ用リポジトリへの書き込み権限も必要。
