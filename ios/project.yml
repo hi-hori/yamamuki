@@ -11,7 +11,11 @@ targets:
   Yamamuki:
     type: application
     platform: iOS
-    sources: [Yamamuki]
+    sources:
+      - path: Yamamuki
+      - path: Generated/Peaks
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: YamamukiCore
     settings:

@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.hardware.GeomagneticField
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -20,14 +21,12 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -50,7 +49,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -68,8 +66,8 @@ import io.github.shohei0205.yamamuki.sensor.locationUpdates
 import io.github.shohei0205.yamamuki.sensor.magneticHeadingUpdates
 import io.github.shohei0205.yamamuki.sensor.mslAltitudeM
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.map
 
 private val LOCATION_PERMISSIONS = arrayOf(
     Manifest.permission.ACCESS_FINE_LOCATION,
@@ -94,10 +92,8 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { granted -> hasPermission = granted.values.any { it } }
 
-    // 初回は「山データを取得してよいか」を先に聞き、答えてから位置情報の許可を求める(ダイアログを重ねない)。
-    val consentAsked = state.settings.networkConsentAsked
-    LaunchedEffect(consentAsked) {
-        if (consentAsked && !hasPermission) permissionLauncher.launch(LOCATION_PERMISSIONS)
+    LaunchedEffect(Unit) {
+        if (!hasPermission) permissionLauncher.launch(LOCATION_PERMISSIONS)
     }
     LaunchedEffect(hasPermission) {
         if (!hasPermission) return@LaunchedEffect
@@ -206,7 +202,7 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
         Text(
             "© OpenStreetMap contributors",
             style = MaterialTheme.typography.labelSmall,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp),
+            modifier = Modifier.align(Alignment.BottomEnd).clickable { showSettings = true }.padding(8.dp),
         )
 
         if (!hasPermission) {
@@ -230,14 +226,13 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
                 }
                 StatusLine(
                     message = statusMessage(state, headingAvailable = compassHeading != null),
-                    // 手動取得モードでは左下の更新ボタンで取り直すので、ここには出さない。
-                    actionLabel = if (state.offline && state.connected && !state.loading && !state.settings.manualFetch) "再取得" else null,
+                    actionLabel = if (state.error != null && !state.loading) "再読込" else null,
                     onAction = viewModel::retry,
                 )
             }
         }
 
-        // 左下: 設定と、手動取得モードなら山データの取得。屋外で押しやすいよう既定(40dp)より大きくする。
+        // 屋外で押しやすい大きさの設定ボタン。
         Row(
             Modifier.align(Alignment.BottomStart).padding(8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -245,28 +240,15 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
             FilledTonalIconButton(onClick = { showSettings = true }, modifier = Modifier.size(52.dp)) {
                 Icon(Icons.Filled.Settings, contentDescription = "設定", Modifier.size(28.dp))
             }
-            if (hasPermission && state.settings.manualFetch) {
-                FilledTonalIconButton(
-                    onClick = viewModel::fetchManually,
-                    enabled = state.location != null && !state.loading,
-                    modifier = Modifier.size(52.dp),
-                ) {
-                    if (state.loading) {
-                        CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 3.dp)
-                    } else {
-                        Icon(Icons.Filled.Refresh, contentDescription = "山データを取得", Modifier.size(28.dp))
-                    }
-                }
-            }
         }
 
         if (showSettings) {
             SettingsScreen(
                 settings = state.settings,
-                cacheInfo = state.cacheInfo,
+                dataInfo = state.dataInfo,
                 onSettingsChange = viewModel::updateSettings,
-                onOpen = viewModel::refreshCacheInfo,
-                onClearCache = viewModel::clearCache,
+                exportMessage = state.exportMessage,
+                onExport = viewModel::exportPeaks,
                 onClose = { showSettings = false },
             )
         }
@@ -280,55 +262,9 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
         onDispose { view.keepScreenOn = false }
     }
 
-    if (!consentAsked) {
-        NetworkConsentDialog(onAnswer = viewModel::answerNetworkConsent)
-    }
-
-    // 通信の失敗は、方位を待つ表示などに隠れて気づけないことがないよう、画面中央で知らせる。
-    state.fetchErrorMessage?.let { message ->
-        FetchErrorDialog(
-            message = message,
-            onRetry = viewModel::retryAfterFetchError,
-            onDismiss = viewModel::dismissFetchError,
-        )
-    }
-
     if (selected != null && !showSettings) {
         MountainDetailDialog(selected, fromCenter = state.exploring, onDismiss = { selectedId = null })
     }
-}
-
-/** 初回起動時に、山データを自動で取得してよいかを聞く。どちらかを選ぶまで閉じない。 */
-@Composable
-private fun NetworkConsentDialog(onAnswer: (Boolean) -> Unit) {
-    AlertDialog(
-        onDismissRequest = {},
-        properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false),
-        title = { Text("山データの取得") },
-        text = {
-            Text(
-                "周辺の山の名前・位置・標高を OpenStreetMap（Overpass API）から取得します。" +
-                    "問い合わせには現在地周辺の範囲が含まれます。" +
-                    "通信量は 1 回あたり数十 KB 程度で、取得したデータは端末に保存して使い回します。\n\n" +
-                    "自動で取得してよいですか？\n" +
-                    "「いいえ」なら、画面左下の更新ボタンを押したときだけ通信します。設定はあとから変更できます。",
-            )
-        },
-        confirmButton = { TextButton(onClick = { onAnswer(true) }) { Text("はい") } },
-        dismissButton = { TextButton(onClick = { onAnswer(false) }) { Text("いいえ") } },
-    )
-}
-
-/** 山データの取得に失敗したことを知らせ、再取得できるようにする。 */
-@Composable
-private fun FetchErrorDialog(message: String, onRetry: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("山データを取得できませんでした") },
-        text = { Text(message) },
-        confirmButton = { TextButton(onClick = onRetry) { Text("再取得") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
-    )
 }
 
 /** タップした山の詳細。 */
@@ -358,17 +294,12 @@ private fun DetailRow(label: String, value: String) {
 }
 
 private fun statusMessage(state: DialUiState, headingAvailable: Boolean): String? = when {
+    state.error != null -> state.error
     state.location == null -> "現在地を取得しています…"
     !headingAvailable -> "方位センサーの値を待っています…"
-    state.loading -> "山データを取得中…"
-    !state.connected && state.incomplete -> "圏外のため、この付近の山データがありません"
-    !state.connected -> "圏外: 保存済みのデータで表示中"
-    state.offline && state.incomplete -> "通信できず、この付近の山データがありません"
-    state.offline -> "オフライン: 保存済みのデータで表示中"
-    state.settings.manualFetch && state.incomplete -> "この付近の山データがありません。左下の更新ボタンで取得できます"
+    state.loading -> "内蔵データを読み込み中…"
     else -> null
 }
-
 @Composable
 private fun StatusLine(
     message: String?,

@@ -1,7 +1,6 @@
 import CoreLocation
 import Foundation
 import Observation
-import os
 import YamamukiCore
 
 struct GeoPoint: Equatable {
@@ -31,49 +30,25 @@ final class DialModel {
     /// 現在地から画面上端までの距離。
     private(set) var rangeKm: Double
     private(set) var loading = false
-    /// 通信に失敗し、キャッシュだけで表示している。
-    private(set) var offline = false
-    /// 端末が通信できる状態か。圏外や機内モードでは false になり、取得を控えて保存済みのデータで表示する。
-    private(set) var isConnected = true
-    /// 通信に失敗したときに画面中央で知らせる文言。閉じるまで保つ。
-    private(set) var fetchErrorMessage: String?
-    /// 範囲内に一度も取得できていない地域がある。
-    private(set) var incomplete = false
-    /// 手動取得モードのため、未取得または古い地域があっても通信しなかった。
-    private(set) var networkSkipped = false
+    private(set) var errorMessage: String?
+    private(set) var dataInfo: BundledPeakInfo?
     private(set) var settings: Settings
-    /// 設定画面に出すキャッシュの状況。読み込むまでは nil。
-    private(set) var cacheInfo: CacheInfo?
     private(set) var authorization: CLAuthorizationStatus = .notDetermined
 
     var hasLocationPermission: Bool {
         authorization == .authorizedWhenInUse || authorization == .authorizedAlways
     }
 
-    private let cache: FileMountainCache
-    private let repository: MountainRepository
+    private let data = BundledPeakStore()
     private let settingsStore = SettingsStore()
     private let locationService = LocationService()
-    private let networkMonitor = NetworkMonitor()
     @ObservationIgnored private var peaks: [Mountain] = []
     @ObservationIgnored private var fetchedCenter: GeoPoint?
     @ObservationIgnored private var fetchedRadiusKm = 0.0
     @ObservationIgnored private var fetchTask: Task<Void, Never>?
-    /// 圏外のため取得を控えた。値は手動の取得だったか。つながったらその続きを取得する。
-    @ObservationIgnored private var skippedWhileDisconnected: Bool?
-    private let logger = Logger(subsystem: "io.github.shohei0205.yamamuki", category: "DialModel")
-
-    /// これ以上移動したら取り直す。取得済みの地域ならキャッシュから読むだけで通信しない。
-    private static let refetchDistanceKm = 1.0
+    private static let refetchDistanceKm = 0.2
 
     init() {
-        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("mountains", isDirectory: true)
-        cache = FileMountainCache(directory: directory)
-        repository = MountainRepository(
-            remote: OverpassClient(userAgent: "yamamuki-ios/0.1 (+https://github.com/shohei0205/yamamuki)"),
-            cache: cache
-        )
         let saved = SettingsStore().load()
         settings = saved
         rangeKm = Double(saved.initialRangeKm)
@@ -81,7 +56,6 @@ final class DialModel {
 
         locationService.onLocation = { [weak self] in self?.onLocation($0) }
         locationService.onHeading = { [weak self] in self?.heading = $0 }
-        networkMonitor.onChange = { [weak self] in self?.onConnectivity($0) }
         locationService.onAuthorizationChange = { [weak self] status in
             guard let self else { return }
             authorization = status
@@ -89,12 +63,13 @@ final class DialModel {
         }
     }
 
-    /// 画面が前面に出たとき。初回は「山データを取得してよいか」に答えてから位置情報の許可を求める(ダイアログを重ねない)。
+    /// 画面が前面に出たとき。山頂データは通信せず内蔵版を読む。
     func start() {
-        if settings.networkConsentAsked && authorization == .notDetermined {
+        if authorization == .notDetermined {
             locationService.requestAuthorization()
         }
         locationService.start()
+        if dataInfo == nil { refreshDataInfo() }
     }
 
     func stop() {
@@ -119,16 +94,6 @@ final class DialModel {
             return
         }
         fetch()
-    }
-
-    private func onConnectivity(_ connected: Bool) {
-        guard connected != isConnected else { return }
-        isConnected = connected
-        // 圏外で控えていた取得を、つながったところで行う。
-        if connected, let manual = skippedWhileDisconnected {
-            skippedWhileDisconnected = nil
-            fetch(manual: manual)
-        }
     }
 
     /// ピンチの倍率(前回からの変化分)。
@@ -193,28 +158,13 @@ final class DialModel {
         fetch()
     }
 
-    func retry() { fetch(forceRefresh: true) }
+    func retry() { refreshDataInfo(); fetch() }
 
-    /// 通信エラーの知らせを閉じる。
-    func dismissFetchError() { fetchErrorMessage = nil }
-
-    /// 通信エラーの知らせから取り直す。利用者が求めたので、手動取得モードでも通信する。
-    func retryAfterFetchError() {
-        fetchErrorMessage = nil
-        fetch(manual: true)
-    }
-
-    /// 左下の更新ボタン(山データを取得)。今の表示範囲のうち、未取得または古い地域を取得する。
-    func fetchManually() { fetch(manual: true) }
-
-    /// 初回起動時の「山データを自動で取得してよいか」への答え。いいえなら手動取得モードにする。
-    func answerNetworkConsent(allow: Bool) {
-        updateSettings {
-            $0.networkConsentAsked = true
-            $0.manualFetch = !allow
+    private func refreshDataInfo() {
+        Task { @MainActor in
+            do { dataInfo = try await data.info(); errorMessage = nil }
+            catch { errorMessage = "内蔵データを読み込めません: \(error.localizedDescription)" }
         }
-        if allow { fetch() }
-        if authorization == .notDetermined { locationService.requestAuthorization() }
     }
 
     func updateSettings(_ transform: (inout Settings) -> Void) {
@@ -232,109 +182,31 @@ final class DialModel {
             rangeKm = Double(after.initialRangeKm)
             if DialGeometry.fetchRadiusKm(rangeKm) > fetchedRadiusKm { fetch() }
         }
-        // 手動取得をやめたら、控えていた分をすぐ取得する。
-        if before.manualFetch && !after.manualFetch && networkSkipped { fetch() }
     }
 
-    func refreshCacheInfo() {
-        Task { @MainActor in
-            cacheInfo = await cache.info()
-        }
-    }
-
-    /// キャッシュを消して、現在地周辺を取り直す。
-    func clearCache() {
-        fetchTask?.cancel()
-        Task { @MainActor in
-            await cache.clear()
-            peaks = []
-            mountains = []
-            summit = nil
-            cacheInfo = await cache.info()
-            fetch()
-        }
-    }
-
-    private func fetch(forceRefresh: Bool = false, manual: Bool = false) {
+    private func fetch() {
         guard let here = location else { return }
         let radius = DialGeometry.fetchRadiusKm(rangeKm)
-        let settings = self.settings
-        // 初回の問い合わせに答えるまでは、キャッシュだけで表示して通信しない。
-        let wantsNetwork = manual || (!settings.manualFetch && settings.networkConsentAsked)
-        // 圏外と分かっていれば通信を試さない(失敗を待たず、エラーの知らせも出さない)。
-        let connected = isConnected
-        let allowNetwork = wantsNetwork && connected
-        fetchedCenter = here
-        fetchedRadiusKm = radius
         fetchTask?.cancel()
         fetchTask = Task { @MainActor [weak self] in
             guard let self else { return }
             loading = true
+            errorMessage = nil
             do {
-                if exploring && !manual && !forceRefresh { try await Task.sleep(nanoseconds: 250_000_000) }
-                let result = try await repository.mountainsAround(
-                    latitude: here.latitude,
-                    longitude: here.longitude,
-                    radiusKm: radius,
-                    forceRefresh: forceRefresh,
-                    allowNetwork: allowNetwork,
-                    maxAge: settings.cacheMaxAge
-                )
-                // 新しい取得に置き換わっていたら、古い結果で上書きしない。
+                if exploring { try await Task.sleep(nanoseconds: 80_000_000) }
+                let result = try await data.nearby(latitude: here.latitude, longitude: here.longitude, radiusKm: radius)
                 guard !Task.isCancelled else { return }
-                if let error = result.error {
-                    logger.warning("山データの取得に失敗: \(String(describing: error), privacy: .public)")
-                }
-                peaks = result.mountains.map(\.mountain)
+                peaks = result
+                fetchedCenter = here
+                fetchedRadiusKm = radius
                 updatePeaks(at: observerLocation ?? here)
-                let skippedOffline = wantsNetwork && !connected && result.networkSkipped
-                if skippedOffline {
-                    skippedWhileDisconnected = manual
-                } else if allowNetwork {
-                    skippedWhileDisconnected = nil
-                }
-                offline = result.error != nil || skippedOffline
-                let hasCache = !peaks.isEmpty
-                if let error = result.error {
-                    fetchErrorMessage = Self.errorNotice(for: error, hasCache: hasCache)
-                } else if skippedOffline && manual {
-                    // 自分で取得を押したときだけ、圏外で取得できなかったことを知らせる。
-                    fetchErrorMessage = Self.offlineNotice(hasCache: hasCache)
-                } else if !skippedOffline {
-                    fetchErrorMessage = nil
-                }
-                incomplete = result.incomplete
-                networkSkipped = result.networkSkipped
                 loading = false
             } catch {
                 guard !Task.isCancelled else { return }
-                logger.error("山データの読み込みに失敗: \(String(describing: error), privacy: .public)")
+                errorMessage = "内蔵データを読み込めません: \(error.localizedDescription)"
                 loading = false
             }
         }
-    }
-
-    /// 通信エラーの知らせの文言。端末がつながっていないのか、サーバー側の問題かで案内を変える。
-    private static func errorNotice(for error: Error, hasCache: Bool) -> String {
-        if isOffline(error) { return offlineNotice(hasCache: hasCache) }
-        let cause = "山データのサーバーが混み合っているか、応答がありません。しばらくしてから再取得してください。"
-        return hasCache ? cause + "\n\n保存済みのデータで表示しています。" : cause
-    }
-
-    private static func offlineNotice(hasCache: Bool) -> String {
-        let cause = "インターネットに接続されていません。電波の届く場所で再取得してください。"
-        return hasCache ? cause + "\n\n保存済みのデータで表示しています。" : cause
-    }
-
-    /// 端末が通信できない状態で失敗したか。Overpass はエンドポイントごとの原因をまとめて返すので、すべてを見る。
-    private static func isOffline(_ error: Error) -> Bool {
-        if let e = error as? URLError {
-            return [.notConnectedToInternet, .networkConnectionLost, .dataNotAllowed, .internationalRoamingOff].contains(e.code)
-        }
-        if let e = error as? OverpassError {
-            return !e.causes.isEmpty && e.causes.allSatisfy(isOffline)
-        }
-        return false
     }
 
     /// [p] から見た山の一覧と、山頂にいるならその山を入れ直す。

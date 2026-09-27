@@ -18,3 +18,6 @@ ios/YamamukiCore/.build/
 ios/YamamukiCore/.swiftpm/
 xcuserdata/
 DerivedData/
+
+/ios/Generated/
+**/__pycache__/

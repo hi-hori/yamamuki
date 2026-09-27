@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.security.MessageDigest
 
 plugins {
     alias(libs.plugins.android.application)
@@ -62,6 +63,30 @@ android {
     }
 }
 
+val verifyBundledData by tasks.registering {
+    val data = layout.projectDirectory.file("src/main/assets/offline/peaks.zip")
+    val hash = layout.projectDirectory.file("src/main/assets/offline/peaks.sha256")
+    inputs.files(data, hash)
+    doLast {
+        check(data.asFile.exists() && hash.asFile.exists()) {
+            "内蔵データがありません。tools/offline_data/build-data.ps1 を実行してください。"
+        }
+        val digest = MessageDigest.getInstance("SHA-256")
+        data.asFile.inputStream().use { stream ->
+            val buffer = ByteArray(65536)
+            while (true) {
+                val count = stream.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        check(digest.digest().joinToString("") { "%02x".format(it) } == hash.asFile.readText().trim()) {
+            "内蔵データの SHA-256 が一致しません。再ビルドしてください。"
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(verifyBundledData) }
+
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
@@ -76,7 +101,6 @@ dependencies {
     implementation("io.github.shohei0205.yamamuki:core")
 
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.ktor.client.okhttp)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)

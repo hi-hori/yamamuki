@@ -1,17 +1,19 @@
 package io.github.shohei0205.yamamuki.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -24,10 +26,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.content.pm.PackageInfoCompat
@@ -36,7 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.shohei0205.yamamuki.core.byteSizeText
-import io.github.shohei0205.yamamuki.data.CacheInfo
+import io.github.shohei0205.yamamuki.data.BundledInfo
 import io.github.shohei0205.yamamuki.settings.Settings
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -51,15 +51,15 @@ private const val MAX_PEAKS_STEP = 10
 @Composable
 fun SettingsScreen(
     settings: Settings,
-    cacheInfo: CacheInfo?,
+    dataInfo: BundledInfo?,
     onSettingsChange: ((Settings) -> Settings) -> Unit,
-    onOpen: () -> Unit,
-    onClearCache: () -> Unit,
+    exportMessage: String?,
+    onExport: (Uri) -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BackHandler(onBack = onClose)
-    LaunchedEffect(Unit) { onOpen() }
+
 
     Surface(modifier.fillMaxSize()) {
         Column(
@@ -93,6 +93,7 @@ fun SettingsScreen(
 
             HorizontalDivider()
             SectionTitle("表示")
+            Text("上部の方角表示を左右にスワイプすると、移動量に応じて地図の方位を変更できます。1本指のドラッグで地図・双眼鏡・同心円を一緒に移動できます。移動後は2本指の中間点を中心とした回転で地図の方位を変更できます。双眼鏡の向きは常にコンパスに追従します。「現在地に戻る」でGPS位置と地図の方位の自動追従を再開します。2本指のピンチで拡大・縮小できます。", style = MaterialTheme.typography.bodySmall)
             Choice(
                 title = "文字の大きさ",
                 options = Settings.TEXT_SCALES,
@@ -120,30 +121,8 @@ fun SettingsScreen(
             )
 
             HorizontalDivider()
-            SectionTitle("通信とキャッシュ")
-            SwitchRow(
-                title = "山データを手動で取得",
-                description = "自動では通信せず、保存済みのデータで表示します。方位盤の左下の更新ボタンを押したときだけ、" +
-                    "今の表示範囲を取得します。山に入る前に、電波の届く場所で縮小して広めに取得しておくと安心です。",
-                checked = settings.manualFetch,
-                onChange = { v -> onSettingsChange { it.copy(manualFetch = v) } },
-            )
-            Choice(
-                title = "取得したデータを使う期間",
-                options = Settings.CACHE_MAX_AGE_DAYS,
-                selected = settings.cacheMaxAgeDays,
-                // 5 つ並ぶと「180日」が収まらないので、長い期間は「半年」「1年」と書く。
-                label = {
-                    when (it) {
-                        180 -> "半年"
-                        365 -> "1年"
-                        else -> "${it}日"
-                    }
-                },
-                description = "この期間を過ぎた地域は取り直します。山データはめったに変わらないので、長くすると通信が減ります。",
-                onSelect = { v -> onSettingsChange { it.copy(cacheMaxAgeDays = v) } },
-            )
-            CacheSection(cacheInfo, onClearCache)
+            SectionTitle("内蔵データとライセンス")
+            DataSection(dataInfo, exportMessage, onExport)
 
             HorizontalDivider()
             SectionTitle("このアプリについて")
@@ -249,43 +228,22 @@ private fun SwitchRow(title: String, description: String, checked: Boolean, onCh
 }
 
 @Composable
-private fun CacheSection(info: CacheInfo?, onClear: () -> Unit) {
-    var confirming by remember { mutableStateOf(false) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("保存しているデータ", style = MaterialTheme.typography.bodyLarge)
-        if (info == null) {
-            Text("読み込み中…", style = MaterialTheme.typography.bodyMedium)
-        } else {
-            Text(
-                String.format(Locale.US, "山 %,d 件（取得済みの区画 %d 個）・容量 %s", info.mountainCount, info.tileCount, byteSizeText(info.sizeBytes)),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        Text(
-            "消去すると現在地の周辺を取り直すので、通信が発生します。",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Spacer(Modifier.padding(top = 4.dp))
-        OutlinedButton(
-            onClick = { confirming = true },
-            enabled = info != null && info.tileCount > 0,
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("キャッシュを消去") }
+private fun DataSection(info: BundledInfo?, exportMessage: String?, onExport: (Uri) -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) {
+        if (it != null) onExport(it)
     }
-
-    if (confirming) {
-        AlertDialog(
-            onDismissRequest = { confirming = false },
-            title = { Text("キャッシュを消去しますか？") },
-            text = { Text("保存している山データをすべて消去し、現在地の周辺を取り直します。") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirming = false
-                    onClear()
-                }) { Text("消去") }
-            },
-            dismissButton = { TextButton(onClick = { confirming = false }) { Text("キャンセル") } },
-        )
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (info == null) Text("読み込み中…") else {
+            Text("山頂 ${info.peakCount} 件・内蔵パック ${byteSizeText(info.bytes)}")
+            Text("山頂データ ${info.osmDate}・素材取得 ${info.inputDate}", style = MaterialTheme.typography.bodySmall)
+        }
+        Text("日本の山頂を内蔵しています。通信なしで利用でき、データはアプリ更新時に更新されます。未登録の山や日本国外の山は収録していません。", style = MaterialTheme.typography.bodySmall)
+        Text("山頂 © OpenStreetMap contributors — ODbL 1.0", style = MaterialTheme.typography.bodySmall)
+        TextButton(onClick = { uriHandler.openUri("https://www.openstreetmap.org/copyright") }) { Text("OpenStreetMap の著作権とライセンス") }
+        TextButton(onClick = { uriHandler.openUri("https://opendatacommons.org/licenses/odbl/1-0/") }) { Text("ODbL 1.0") }
+        Text("抽出・整形した山頂データも ODbL 1.0 で提供します。全件の山頂CSVとライセンス本文を保存・再利用できます。", style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = { save.launch("yamamuki-OSM-ODbL.zip") }, enabled = info != null && exportMessage != "保存中…") { Text("山頂データとライセンスを保存") }
+        if (exportMessage != null) Text(exportMessage, style = MaterialTheme.typography.bodySmall)
     }
 }

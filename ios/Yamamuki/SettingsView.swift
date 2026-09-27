@@ -57,28 +57,20 @@ struct SettingsView: View {
                     ) { v in model.updateSettings { $0.keepScreenOn = v } }
                 }
 
-                Section("通信とキャッシュ") {
-                    SwitchRow(
-                        title: "山データを手動で取得",
-                        description: "自動では通信せず、保存済みのデータで表示します。方位盤の左下の更新ボタンを押したときだけ、" +
-                            "今の表示範囲を取得します。山に入る前に、電波の届く場所で縮小して広めに取得しておくと安心です。",
-                        isOn: settings.manualFetch
-                    ) { v in model.updateSettings { $0.manualFetch = v } }
-                    Choice(
-                        title: "取得したデータを使う期間",
-                        options: Settings.cacheMaxAgeDaysOptions,
-                        selected: settings.cacheMaxAgeDays,
-                        // 5 つ並ぶと「180日」が収まらないので、長い期間は「半年」「1年」と書く。
-                        label: { days in
-                            switch days {
-                            case 180: return "半年"
-                            case 365: return "1年"
-                            default: return "\(days)日"
-                            }
-                        },
-                        description: "この期間を過ぎた地域は取り直します。山データはめったに変わらないので、長くすると通信が減ります。"
-                    ) { v in model.updateSettings { $0.cacheMaxAgeDays = v } }
-                    CacheSection(info: model.cacheInfo, onClear: model.clearCache)
+                Section("内蔵データとライセンス") {
+                    if let info = model.dataInfo {
+                        Text("山頂 \(info.count) 件・パック \(byteSizeText(info.bytes))")
+                        Text("山頂データ \(info.osmDate)・素材取得 \(info.inputDate)").font(.footnote)
+                    }
+                    Text("日本の名前付き山頂を内蔵しています。通信なしで利用でき、データはアプリ更新時に更新されます。未登録・無名・国外の山は含みません。")
+                    Text("山頂 © OpenStreetMap contributors — ODbL 1.0")
+                    Link("OpenStreetMap の著作権とライセンス", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
+                    Link("ODbL 1.0", destination: URL(string: "https://opendatacommons.org/licenses/odbl/1-0/")!)
+                    Text("抽出・整形した山頂データもODbL 1.0で提供します。全件の山頂CSVとライセンス本文を保存・再利用できます。")
+                    if let url = Bundle.main.url(forResource: "peaks", withExtension: "zip", subdirectory: "Peaks") {
+                        ShareLink("山頂データとライセンスを保存・共有", item: url)
+                    }
+                    if let error = model.errorMessage { Text(error).foregroundStyle(.red) }
                 }
 
                 Section("このアプリについて") {
@@ -96,7 +88,6 @@ struct SettingsView: View {
                 }
             }
         }
-        .onAppear { model.refreshCacheInfo() }
     }
 
     /// project.yml の MARKETING_VERSION / CURRENT_PROJECT_VERSION。
@@ -190,32 +181,5 @@ private struct SwitchRow: View {
                 Text(description).font(.footnote).foregroundStyle(.secondary)
             }
         }
-    }
-}
-
-private struct CacheSection: View {
-    let info: CacheInfo?
-    let onClear: () -> Void
-    @State private var confirming = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("保存しているデータ")
-            if let info {
-                Text("山 \(groupedInteger(info.mountainCount)) 件（取得済みの区画 \(info.tileCount) 個）・容量 \(byteSizeText(info.sizeBytes))")
-                    .font(.subheadline)
-            } else {
-                Text("読み込み中…").font(.subheadline)
-            }
-            Text("消去すると現在地の周辺を取り直すので、通信が発生します。").font(.footnote).foregroundStyle(.secondary)
-        }
-        Button("キャッシュを消去", role: .destructive) { confirming = true }
-            .disabled(info == nil || info?.tileCount == 0)
-            .alert("キャッシュを消去しますか？", isPresented: $confirming) {
-                Button("消去", role: .destructive, action: onClear)
-                Button("キャンセル", role: .cancel) {}
-            } message: {
-                Text("保存している山データをすべて消去し、現在地の周辺を取り直します。")
-            }
     }
 }

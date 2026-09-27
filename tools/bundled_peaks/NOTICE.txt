@@ -1,0 +1,9 @@
+山むき 山頂データ / Yamamuki bundled peaks
+© OpenStreetMap contributors
+https://www.openstreetmap.org/copyright
+Open Database License (ODbL) 1.0
+https://opendatacommons.org/licenses/odbl/1-0/
+日本のnatural=peak/volcanoの名前付きノードを抽出し、CSVに整形。
+この山頂データの複製・改変・再配布にはODbL 1.0が適用されます。
+peaks.csv.gzはアプリと同一の全件データです。設定からライセンスとともに保存できます。
+アプリ本体のソースコードはMITライセンスです。

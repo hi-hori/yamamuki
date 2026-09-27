@@ -32,7 +32,7 @@ struct DialView: View {
                 onMountainTap: { selectedId = $0.mountain.osmId }
             )
 
-            if model.settings.networkConsentAsked && !model.hasLocationPermission {
+            if !model.hasLocationPermission {
                 PermissionRequest(denied: model.authorization == .denied || model.authorization == .restricted) {
                     model.requestLocationPermission()
                 }
@@ -54,8 +54,8 @@ struct DialView: View {
                     }
                     StatusLine(
                         message: statusMessage,
-                        // 手動取得モードでは左下の更新ボタンで取り直すので、ここには出さない。
-                        actionLabel: model.offline && model.isConnected && !model.loading && !model.settings.manualFetch ? "再取得" : nil,
+                        // 内蔵データを読み込めなかった場合だけ再試行する。
+                        actionLabel: model.errorMessage != nil && !model.loading ? "再読込" : nil,
                         onAction: model.retry
                     )
                     Spacer()
@@ -83,29 +83,15 @@ struct DialView: View {
         .onChange(of: model.settings.keepScreenOn, initial: true) { _, on in
             UIApplication.shared.isIdleTimerDisabled = on
         }
-        .alert("山データの取得", isPresented: .constant(!model.settings.networkConsentAsked)) {
-            Button("はい") { model.answerNetworkConsent(allow: true) }
-            Button("いいえ") { model.answerNetworkConsent(allow: false) }
-        } message: {
-            Text(
-                "周辺の山の名前・位置・標高を OpenStreetMap（Overpass API）から取得します。" +
-                    "問い合わせには現在地周辺の範囲が含まれます。" +
-                    "通信量は 1 回あたり数十 KB 程度で、取得したデータは端末に保存して使い回します。\n\n" +
-                    "自動で取得してよいですか？\n" +
-                    "「いいえ」なら、画面左下の更新ボタンを押したときだけ通信します。設定はあとから変更できます。"
-            )
-        }
-        .fetchErrorAlert(model)
-        // シートを開いている間は下の画面からアラートを出せないので、シートの中身にも付ける。
         .sheet(isPresented: $showSettings) {
-            SettingsView(model: model).fetchErrorAlert(model)
+            SettingsView(model: model)
         }
         .sheet(item: selectedMountain) { nearby in
-            MountainDetailView(nearby: nearby, fromObserver: model.exploring).fetchErrorAlert(model)
+            MountainDetailView(nearby: nearby, fromObserver: model.exploring)
         }
     }
 
-    /// 左下: 設定と、手動取得モードなら山データの取得。屋外で押しやすいよう大きめにする。
+    /// 屋外で押しやすい大きさの設定ボタン。
     private var bottomButtons: some View {
         HStack(spacing: 8) {
             RoundButton(label: "設定") {
@@ -113,18 +99,7 @@ struct DialView: View {
             } action: {
                 showSettings = true
             }
-            if model.hasLocationPermission && model.settings.manualFetch {
-                RoundButton(label: "山データを取得") {
-                    if model.loading {
-                        ProgressView()
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                } action: {
-                    model.fetchManually()
-                }
-                .disabled(model.location == nil || model.loading)
-            }
+
         }
     }
 
@@ -141,41 +116,11 @@ struct DialView: View {
     }
 
     private var statusMessage: String? {
+        if let error = model.errorMessage { return error }
         if model.location == nil { return "現在地を取得しています…" }
         if model.heading == nil { return "方位センサーの値を待っています…" }
-        if model.loading { return "山データを取得中…" }
-        if !model.isConnected && model.incomplete { return "圏外のため、この付近の山データがありません" }
-        if !model.isConnected { return "圏外: 保存済みのデータで表示中" }
-        if model.offline && model.incomplete { return "通信できず、この付近の山データがありません" }
-        if model.offline { return "オフライン: 保存済みのデータで表示中" }
-        if model.settings.manualFetch && model.incomplete { return "この付近の山データがありません。左下の更新ボタンで取得できます" }
+        if model.loading { return "内蔵データを読み込み中…" }
         return nil
-    }
-}
-
-/// 通信に失敗したら画面中央で知らせる。方位を待つ表示などに隠れて気づけないことがないようにする。
-private struct FetchErrorAlert: ViewModifier {
-    let model: DialModel
-
-    func body(content: Content) -> some View {
-        content.alert(
-            "山データを取得できませんでした",
-            isPresented: Binding(
-                get: { model.fetchErrorMessage != nil },
-                set: { if !$0 { model.dismissFetchError() } }
-            )
-        ) {
-            Button("再取得") { model.retryAfterFetchError() }
-            Button("閉じる", role: .cancel) { model.dismissFetchError() }
-        } message: {
-            Text(model.fetchErrorMessage ?? "")
-        }
-    }
-}
-
-private extension View {
-    func fetchErrorAlert(_ model: DialModel) -> some View {
-        modifier(FetchErrorAlert(model: model))
     }
 }
 

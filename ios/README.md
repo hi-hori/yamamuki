@@ -6,7 +6,24 @@ Android 版とほぼ同じ機能の iOS アプリ（Swift + SwiftUI、iOS 17 以
 
 ```bash
 cd ios
+python3 prepare-peaks.py          # Androidと共通のパックから内蔵リソースを準備
 (cd YamamukiCore && swift test)   # core の単体テスト
 xcodegen generate                 # Yamamuki.xcodeproj を生成
 open Yamamuki.xcodeproj
 ```
+
+山頂データは初回から通信なしで表示する。日本の名前付き山頂約1万4千件を収録し、
+手動移動後も内蔵版を参照する。地形・河川は含まない。
+設定画面の「山頂データとライセンスを保存・共有」から、Androidと同一のZIPを「ファイルに保存」できる。
+
+`prepare-peaks.py` はパックのSHA-256、件数、座標・IDを検証し、
+`Generated/Peaks` にJSONと出典・ライセンス、配布用ZIPを生成する。Python標準ライブラリのみを使う。
+山頂パックの更新後は再実行してからビルドする。生成物はGit管理外。
+CIでもデータ準備、Swiftのテスト、シミュレータービルドの順に実行する。
+
+```bash
+python3 -m unittest discover -s . -p 'test_prepare_peaks.py'
+```
+
+確認項目: 機内モードで初回起動、GPS位置の山名表示、手動移動・回転・現在地リセット、
+標高フィルター、設定からZIPを保存してCSV・ライセンスが取り出せること。

@@ -3,9 +3,9 @@ name: iOS
 on:
   push:
     branches: [main]
-    paths: ["ios/**", ".github/workflows/ios.yml"]
+    paths: ["ios/**", "app/src/main/assets/offline/**", ".github/workflows/ios.yml"]
   pull_request:
-    paths: ["ios/**", ".github/workflows/ios.yml"]
+    paths: ["ios/**", "app/src/main/assets/offline/**", ".github/workflows/ios.yml"]
 
 # 外部からの PR でも動くので、トークンはリポジトリの読み取りだけに絞る。
 permissions:
@@ -16,6 +16,10 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: 内蔵山頂データを準備・検証
+        run: |
+          python3 -m unittest discover -s ios -p 'test_prepare_peaks.py'
+          python3 ios/prepare-peaks.py
       - name: core のテスト
         working-directory: ios/YamamukiCore
         run: swift test

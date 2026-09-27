@@ -1,37 +1,10 @@
 package io.github.shohei0205.yamamuki
 
 import android.app.Application
-import io.github.shohei0205.yamamuki.core.MountainRepository
-import io.github.shohei0205.yamamuki.core.OverpassClient
-import io.github.shohei0205.yamamuki.data.CacheManager
-import io.github.shohei0205.yamamuki.data.MountainDatabase
-import io.github.shohei0205.yamamuki.data.RoomMountainCache
+import io.github.shohei0205.yamamuki.data.BundledData
 import io.github.shohei0205.yamamuki.settings.AppSettings
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.okhttp.OkHttp
-import io.ktor.client.plugins.HttpTimeout
 
 class YamamukiApp : Application() {
-
-    private val database: MountainDatabase by lazy { MountainDatabase.create(this) }
-
-    val cacheManager: CacheManager by lazy { CacheManager(this, database) }
-
     val settings: AppSettings by lazy { AppSettings(this) }
-
-    val mountainRepository: MountainRepository by lazy {
-        val http = HttpClient(OkHttp) {
-            // Overpass は集計が終わるまで応答を返さず 20 秒以上かかることがある。
-            // socketTimeout を指定しないと OkHttp 既定の 10 秒で読み込みが打ち切られる。
-            install(HttpTimeout) {
-                requestTimeoutMillis = 90_000
-                connectTimeoutMillis = 15_000
-                socketTimeoutMillis = 75_000
-            }
-        }
-        MountainRepository(
-            remote = OverpassClient(http, userAgent = "yamamuki-android/0.1 (+https://github.com/shohei0205/yamamuki)"),
-            cache = RoomMountainCache(database.mountainDao()),
-        )
-    }
+    val bundledData: BundledData by lazy { BundledData(this) }
 }
