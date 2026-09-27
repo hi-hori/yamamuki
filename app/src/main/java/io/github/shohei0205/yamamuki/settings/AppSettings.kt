@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class Settings(
+    val showTerrain: Boolean = true,
     val minElevationM: Int = 0,
     val keepScreenOn: Boolean = false,
     val maxPeaks: Int = 40,
@@ -22,6 +23,7 @@ data class Settings(
 class AppSettings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val state = MutableStateFlow(Settings(
+        showTerrain = prefs.getBoolean("show_terrain", true),
         minElevationM = prefs.getInt("min_elevation_m", 0),
         keepScreenOn = prefs.getBoolean("keep_screen_on", false),
         maxPeaks = prefs.getInt("max_peaks", 40),
@@ -32,7 +34,7 @@ class AppSettings(context: Context) {
     fun update(transform: (Settings) -> Settings) {
         val next = transform(state.value)
         state.value = next
-        prefs.edit().putInt("min_elevation_m", next.minElevationM)
+        prefs.edit().putBoolean("show_terrain", next.showTerrain).putInt("min_elevation_m", next.minElevationM)
             .putBoolean("keep_screen_on", next.keepScreenOn)
             .putInt("max_peaks", next.maxPeaks).putFloat("text_scale", next.textScale)
             .putInt("initial_range_km", next.initialRangeKm).apply()

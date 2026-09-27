@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.DrawStyle
 import androidx.compose.ui.graphics.drawscope.Fill
@@ -43,14 +45,20 @@ import io.github.shohei0205.yamamuki.core.NearbyMountain
 import io.github.shohei0205.yamamuki.core.PlanOffset
 import io.github.shohei0205.yamamuki.core.PanGeometry
 import io.github.shohei0205.yamamuki.core.MapCenter
+import io.github.shohei0205.yamamuki.core.TerrainGeometry
+import io.github.shohei0205.yamamuki.data.TerrainImage
 import io.github.shohei0205.yamamuki.core.declutter
 import io.github.shohei0205.yamamuki.core.elevationClass
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.cos
+import kotlin.math.sin
 
 val DialBeige = Color(0xFFEFE4B0)
+// Matches WATER_COLOR in tools/offline_data/build_data.py (sea / DEM no-data).
+private val TerrainWater = Color(0xFF5291B4)
 private val RingGray = Color(0xFFC3C3C3)
 private val PeakGreen = Color(0xFF22B14C)
 private val PeakYellow = Color(0xFFB5E61D)
@@ -101,12 +109,18 @@ fun DialCanvas(
     maxPeaks: Int = 40,
     /** 文字の大きさ(標準 = 1.0 に対する倍率)。 */
     textScale: Float = 1f,
+    terrain: List<TerrainImage> = emptyList(),
     latitude: Double? = null,
     longitude: Double? = null,
     viewportLatitude: Double? = latitude,
     viewportLongitude: Double? = longitude,
     compassHeadingDeg: Double = headingDeg,
 ) {
+    val meshes = remember(terrain, latitude, longitude) {
+        if (latitude == null || longitude == null) emptyList() else
+            terrain.map { tile -> TerrainMesh(tile, TerrainGeometry.mesh(tile.key, latitude, longitude)) }
+    }
+    val terrainPaint = remember { android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG) }
     val styles = remember(textScale) { DialTextStyles(textScale) }
     val textMeasurer = rememberTextMeasurer(cacheSize = 256)
     val hitTargets = remember { HitTargets() }
@@ -126,6 +140,7 @@ fun DialCanvas(
         else PlanOffset(0.0, 0.0)
         val observer = origin + Offset((offset.x * pxPerKm).toFloat(), (-offset.y * pxPerKm).toFloat())
         hitTargets.peaks = if (pxPerKm > 0f) {
+            drawTerrain(observer, pxPerKm, headingDeg, meshes, chartTop, terrainPaint)
             drawRings(observer, pxPerKm, rangeKm, chartTop, textMeasurer, styles)
             drawPeaks(observer, pxPerKm, headingDeg, mountains, chartTop, textMeasurer, styles, maxPeaks)
         } else {
@@ -142,6 +157,45 @@ fun DialCanvas(
         drawReadout(headingDeg, altitudeM, tapeHeight, textMeasurer, styles)
     }
 }
+
+private class TerrainMesh(val tile: TerrainImage, val points: List<PlanOffset>) {
+    val vertices = FloatArray(points.size * 2)
+
+}
+
+/** Cached hillshade: a small mesh per visible tile instead of thousands of contour paths. */
+private fun DrawScope.drawTerrain(
+    observer: Offset,
+    pxPerKm: Float,
+    headingDeg: Double,
+    meshes: List<TerrainMesh>,
+    chartTop: Float,
+    paint: android.graphics.Paint,
+) {
+    val angle = Math.toRadians(headingDeg)
+    val c = cos(angle)
+    val s = sin(angle)
+    clipRect(left = 0f, top = chartTop, right = size.width, bottom = size.height - 52.dp.toPx()) {
+        if (meshes.isNotEmpty()) drawRect(TerrainWater)
+        drawIntoCanvas { canvas ->
+            for (mesh in meshes) {
+                var left = Float.POSITIVE_INFINITY; var right = Float.NEGATIVE_INFINITY
+                var top = Float.POSITIVE_INFINITY; var bottom = Float.NEGATIVE_INFINITY
+                mesh.points.forEachIndexed { index, p ->
+                    val x = observer.x + ((p.x*c-p.y*s)*pxPerKm).toFloat()
+                    val y = observer.y - ((p.x*s+p.y*c)*pxPerKm).toFloat()
+                    mesh.vertices[index*2] = x; mesh.vertices[index*2+1] = y
+                    left = min(left,x); right = max(right,x)
+                    top = min(top,y); bottom = max(bottom,y)
+                }
+                if (right < 0 || left > size.width || bottom < chartTop || top > size.height - 52.dp.toPx()) continue
+                canvas.nativeCanvas.drawBitmapMesh(mesh.tile.bitmap,4,4,mesh.vertices,0,null,0,paint)
+            }
+        }
+    }
+}
+
+
 
 private fun DrawScope.drawRings(
     observer: Offset,

@@ -33,6 +33,9 @@ struct SettingsView: View {
                 }
 
                 Section("表示") {
+                    SwitchRow(title: "地形を表示", description: "内蔵の陰影地形を表示します。", isOn: settings.showTerrain) { v in
+                        model.updateSettings { $0.showTerrain = v }
+                    }
                     Choice(
                         title: "文字の大きさ",
                         options: Settings.textScales,
@@ -73,6 +76,14 @@ struct SettingsView: View {
                     if let error = model.errorMessage { Text(error).foregroundStyle(.red) }
                 }
 
+                Section("地形・河川の出典") {
+                    Text("国土地理院の標高タイルを加工した陰影画像です。国土地理院が作成した製品ではありません。")
+                    Link("国土地理院コンテンツ利用規約", destination: URL(string: "https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html")!)
+                    Text("河川 © OpenStreetMap contributors (ODbL)。北海道の大部分は未収録です。川幅は実測ではありません。")
+                    if let url = Bundle.main.url(forResource: "rivers-ODbL", withExtension: "zip", subdirectory: "Terrain") {
+                        ShareLink("河川データとライセンスを保存・共有", item: url)
+                    }
+                }
                 Section("このアプリについて") {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("バージョン \(appVersion)")

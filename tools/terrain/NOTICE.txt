@@ -1,0 +1,20 @@
+山むき 内蔵陰影地形 / Yamamuki bundled terrain
+
+地形: 国土地理院の標高タイルを加工して作成
+https://maps.gsi.go.jp/development/ichiran.html
+https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html
+国土地理院が作成・保証した完成画像ではありません。
+陰影画像は概観表示用です。標高補間で512pxに拡大していますが、元標高の測定精度は変わりません。
+
+河川: © OpenStreetMap contributors
+https://www.openstreetmap.org/copyright
+Open Database License (ODbL) 1.0:
+https://opendatacommons.org/licenses/odbl/1-0/
+waterway=riverの地上の線を抽出し、約20m許容差で簡略化して画像に合成。
+河川データはODbL 1.0で提供し、rivers.geojson.gzとして設定から保存できます。
+川幅は実測ではありません。北海道の大部分の河川は未収録です。
+
+取得範囲の補助定義: Geofabrik Japan extract polygon
+https://download.geofabrik.de/asia/japan.html
+素材・取得日時・加工条件はmanifest.json/source-lock.jsonを参照。
+アプリ本体・生成ツールはMITライセンスです。

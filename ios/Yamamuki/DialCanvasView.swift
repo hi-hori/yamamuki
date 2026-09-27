@@ -49,6 +49,7 @@ struct DialCanvasView: View {
     let maxPeaks: Int
     /// 文字の大きさ(標準 = 1.0 に対する倍率)。
     let textScale: Double
+    let terrain: TerrainFrame?
     let observerLocation: GeoPoint?
     let viewportLocation: GeoPoint?
     let compassHeading: Double
@@ -85,6 +86,7 @@ struct DialCanvasView: View {
             observer.y -= CGFloat(offset.y) * pxPerKm
         }
         if pxPerKm > 0 {
+            drawTerrain(ctx, size: size, observer: observer, pxPerKm: pxPerKm, chartTop: chartTop)
             drawRings(ctx, size: size, observer: observer, pxPerKm: pxPerKm, chartTop: chartTop, styles: styles)
             hitTargets.peaks = drawPeaks(ctx, size: size, observer: observer, pxPerKm: pxPerKm, chartTop: chartTop, styles: styles)
         } else {
@@ -98,6 +100,21 @@ struct DialCanvasView: View {
         }
         drawTape(ctx, size: size, tapeHeight: tapeHeight)
         drawReadout(ctx, size: size, tapeHeight: tapeHeight, styles: styles)
+    }
+
+    private func drawTerrain(_ ctx: GraphicsContext, size: CGSize, observer: CGPoint, pxPerKm: CGFloat, chartTop: CGFloat) {
+        guard let terrain, let here = observerLocation else { return }
+        let offset = DialGeometry.project(
+            distanceKm: GeoMath.distanceKm(here.latitude, here.longitude, terrain.latitude, terrain.longitude),
+            bearingDeg: GeoMath.bearingDeg(here.latitude, here.longitude, terrain.latitude, terrain.longitude), headingDeg: headingDeg)
+        var context = ctx
+        context.clip(to: Path(CGRect(x: 0, y: chartTop, width: size.width, height: max(0, size.height - 52 - chartTop))))
+        context.translateBy(x: observer.x + CGFloat(offset.x) * pxPerKm, y: observer.y - CGFloat(offset.y) * pxPerKm)
+        context.rotate(by: .degrees(-headingDeg))
+        context.translateBy(x: CGFloat(terrain.centerX) * pxPerKm, y: -CGFloat(terrain.centerY) * pxPerKm)
+        let radius = CGFloat(terrain.radiusKm) * pxPerKm
+        context.draw(Image(decorative: terrain.image, scale: 1, orientation: .up),
+            in: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2))
     }
 
     private func rotatedObserver(_ ctx: GraphicsContext, center: CGPoint) -> GraphicsContext {

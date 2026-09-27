@@ -16,6 +16,9 @@ targets:
       - path: Generated/Peaks
         type: folder
         buildPhase: resources
+      - path: Generated/Terrain
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: YamamukiCore
     settings:

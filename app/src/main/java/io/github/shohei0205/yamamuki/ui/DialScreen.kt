@@ -194,13 +194,14 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
             altitudeM = state.observerLocation?.mslAltitudeM,
             maxPeaks = state.settings.maxPeaks,
             textScale = state.settings.textScale,
+            terrain = state.terrain,
             latitude = state.observerLocation?.latitude,
             longitude = state.observerLocation?.longitude,
             viewportLatitude = state.location?.latitude,
             viewportLongitude = state.location?.longitude,
         )
         Text(
-            "© OpenStreetMap contributors",
+            "山名・河川 © OpenStreetMap contributors\n地形 国土地理院（加工）",
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.align(Alignment.BottomEnd).clickable { showSettings = true }.padding(8.dp),
         )
@@ -226,7 +227,7 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
                 }
                 StatusLine(
                     message = statusMessage(state, headingAvailable = compassHeading != null),
-                    actionLabel = if (state.error != null && !state.loading) "再読込" else null,
+                    actionLabel = if ((state.error != null || state.terrainError != null) && !state.loading && !state.terrainLoading) "再読込" else null,
                     onAction = viewModel::retry,
                 )
             }
@@ -249,6 +250,7 @@ fun DialScreen(viewModel: DialViewModel = viewModel()) {
                 onSettingsChange = viewModel::updateSettings,
                 exportMessage = state.exportMessage,
                 onExport = viewModel::exportPeaks,
+                onExportRivers = viewModel::exportRivers,
                 onClose = { showSettings = false },
             )
         }
@@ -295,6 +297,8 @@ private fun DetailRow(label: String, value: String) {
 
 private fun statusMessage(state: DialUiState, headingAvailable: Boolean): String? = when {
     state.error != null -> state.error
+    state.terrainError != null -> state.terrainError
+    state.terrainLoading -> "地形を読み込み中…"
     state.location == null -> "現在地を取得しています…"
     !headingAvailable -> "方位センサーの値を待っています…"
     state.loading -> "内蔵データを読み込み中…"

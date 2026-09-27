@@ -23,6 +23,7 @@ struct DialView: View {
                 altitudeM: model.observerLocation?.mslAltitudeM,
                 maxPeaks: model.settings.maxPeaks,
                 textScale: model.settings.textScale,
+                terrain: model.terrain,
                 observerLocation: model.observerLocation,
                 viewportLocation: model.location,
                 compassHeading: model.heading ?? model.displayHeading,
@@ -55,7 +56,7 @@ struct DialView: View {
                     StatusLine(
                         message: statusMessage,
                         // 内蔵データを読み込めなかった場合だけ再試行する。
-                        actionLabel: model.errorMessage != nil && !model.loading ? "再読込" : nil,
+                        actionLabel: (model.errorMessage != nil || model.terrainError != nil) && !model.loading && !model.terrainLoading ? "再読込" : nil,
                         onAction: model.retry
                     )
                     Spacer()
@@ -68,7 +69,7 @@ struct DialView: View {
                 HStack(alignment: .bottom) {
                     bottomButtons
                     Spacer()
-                    Text("© OpenStreetMap contributors")
+                    Text("山名・河川 © OpenStreetMap contributors\n地形 国土地理院（加工）")
                         .font(.caption2)
                         .foregroundStyle(.black)
                 }
@@ -117,6 +118,8 @@ struct DialView: View {
 
     private var statusMessage: String? {
         if let error = model.errorMessage { return error }
+        if let error = model.terrainError { return error }
+        if model.terrainLoading { return "地形を読み込み中…" }
         if model.location == nil { return "現在地を取得しています…" }
         if model.heading == nil { return "方位センサーの値を待っています…" }
         if model.loading { return "内蔵データを読み込み中…" }

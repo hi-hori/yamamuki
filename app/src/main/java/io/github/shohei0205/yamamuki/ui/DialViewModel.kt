@@ -1,6 +1,8 @@
 package io.github.shohei0205.yamamuki.ui
 
 import android.app.Application
+import io.github.shohei0205.yamamuki.data.TerrainImage
+import kotlinx.coroutines.ensureActive
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -32,6 +34,9 @@ data class DialUiState(
     val mountains: List<NearbyMountain> = emptyList(),
     val summit: NearbyMountain? = null,
     val rangeKm: Double = DialGeometry.DEFAULT_RANGE_KM,
+    val terrain: List<TerrainImage> = emptyList(),
+    val terrainLoading: Boolean = false,
+    val terrainError: String? = null,
     val loading: Boolean = false,
     val error: String? = null,
     val dataInfo: BundledInfo? = null,
@@ -47,6 +52,9 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
         DialUiState(settings = it, rangeKm = it.initialRangeKm.toDouble())
     })
     val state = mutableState.asStateFlow()
+    private var terrainJob: Job? = null
+    private var terrainCenter: GeoPoint? = null
+    private var terrainRange = 0.0
     private var peaks: List<Mountain> = emptyList()
     private var loadJob: Job? = null
     private var loadedCenter: GeoPoint? = null
@@ -66,6 +74,7 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
         val point = if (newPoint.mslAltitudeM == null) newPoint.copy(mslAltitudeM = state.value.gpsLocation?.mslAltitudeM) else newPoint
         mutableState.update { if (it.exploring) it.copy(gpsLocation = point) else it.copy(gpsLocation = point, location = point, observerLocation = point).withPeaks(point) }
         if (state.value.exploring) return
+        loadTerrain()
         val center = if (loadJob?.isActive == true) requestedCenter else loadedCenter
         if (center == null || GeoMath.distanceKm(center.latitude, center.longitude, point.latitude, point.longitude) > 0.2) load()
     }
@@ -74,11 +83,12 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
         val old = state.value.rangeKm
         val next = DialGeometry.zoomedRange(old, zoom)
         mutableState.update { it.copy(rangeKm = next) }
+        loadTerrain()
         val coverage = if (loadJob?.isActive == true) requestedRange else loadedRange
         if (next > coverage * 1.2) load()
     }
 
-    fun retry() = load()
+    fun retry() { load(); loadTerrain(force = true) }
 
     fun onPan(dxPx: Float, dyPx: Float, chartHeightPx: Float, headingDeg: Double) {
         val here = state.value.location ?: return
@@ -88,6 +98,7 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
         val point = GeoPoint(next.latitude, next.longitude)
         mutableState.update { it.copy(location = point, exploring = true,
             observerLocation = it.observerLocation ?: here, lockedHeading = it.lockedHeading ?: headingDeg) }
+        loadTerrain()
         val center = if (loadJob?.isActive == true) requestedCenter else loadedCenter
         if (center == null || GeoMath.distanceKm(center.latitude, center.longitude, point.latitude, point.longitude) > 0.2) load()
     }
@@ -96,6 +107,7 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
         val here = state.value.gpsLocation ?: return
         mutableState.update { it.copy(location = here, observerLocation = here, exploring = false, lockedHeading = null).withPeaks(here) }
         load()
+        loadTerrain(force = true)
     }
 
     fun onHeadingSwipe(dxPx: Float, widthPx: Float, headingDeg: Double) {
@@ -124,6 +136,7 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
             chartHeightPx / current.rangeKm, chartHeightPx / range, heading, nextHeading)
         val point = GeoPoint(next.latitude, next.longitude)
         mutableState.update { it.copy(location = point, rangeKm = range, lockedHeading = nextHeading) }
+        loadTerrain()
         val center = if (loadJob?.isActive == true) requestedCenter else loadedCenter
         val coverage = if (loadJob?.isActive == true) requestedRange else loadedRange
         if (center == null || GeoMath.distanceKm(center.latitude, center.longitude, point.latitude, point.longitude) > 0.2 ||
@@ -139,6 +152,7 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
             updated.observerLocation?.let { p -> updated.withPeaks(p) } ?: updated
         }
         if (before.initialRangeKm != after.initialRangeKm) load()
+        if (before.showTerrain != after.showTerrain || before.initialRangeKm != after.initialRangeKm) loadTerrain(force = true)
     }
 
     fun exportPeaks(uri: Uri) {
@@ -147,6 +161,47 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 data.exportPeaks(uri)
                 mutableState.update { it.copy(exportMessage = "山頂データとライセンスを保存しました") }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { mutableState.update { it.copy(exportMessage = "保存できませんでした: ${e.message}") } }
+        }
+    }
+
+    private fun loadTerrain(force: Boolean = false) {
+        if (!state.value.settings.showTerrain) {
+            terrainJob?.cancel(); terrainCenter = null; terrainRange = 0.0
+            mutableState.update { it.copy(terrain = emptyList(), terrainLoading = false, terrainError = null) }
+            return
+        }
+        val here = state.value.location ?: return
+        val range = state.value.rangeKm
+        val center = terrainCenter
+        if (!force && center != null &&
+            GeoMath.distanceKm(center.latitude, center.longitude, here.latitude, here.longitude) <= 0.2 &&
+            terrainZoom(range) == terrainZoom(terrainRange) && range <= terrainRange * 1.2) return
+        val refining = terrainRange > 0 && terrainZoom(range) > terrainZoom(terrainRange)
+        terrainJob?.cancel()
+        terrainCenter = here; terrainRange = range
+        terrainJob = viewModelScope.launch {
+            mutableState.update { it.copy(terrainLoading = true, terrainError = null) }
+            try {
+                if (!refining) delay(80)
+                val tiles = app.terrainData.terrain(here.latitude, here.longitude, range)
+                coroutineContext.ensureActive()
+                mutableState.update { it.copy(terrain = tiles, terrainLoading = false) }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                terrainCenter = null
+                mutableState.update { it.copy(terrainLoading = false, terrainError = "地形を読み込めません: ${e.message}") }
+            }
+        }
+    }
+
+    fun exportRivers(uri: Uri) {
+        viewModelScope.launch {
+            mutableState.update { it.copy(exportMessage = "保存中…") }
+            try {
+                app.terrainData.exportRivers(uri)
+                mutableState.update { it.copy(exportMessage = "河川データとライセンスを保存しました") }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { mutableState.update { it.copy(exportMessage = "保存できませんでした: ${e.message}") } }
         }

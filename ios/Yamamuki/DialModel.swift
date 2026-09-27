@@ -29,6 +29,9 @@ final class DialModel {
     private(set) var heading: Double?
     /// 現在地から画面上端までの距離。
     private(set) var rangeKm: Double
+    private(set) var terrain: TerrainFrame?
+    private(set) var terrainLoading = false
+    private(set) var terrainError: String?
     private(set) var loading = false
     private(set) var errorMessage: String?
     private(set) var dataInfo: BundledPeakInfo?
@@ -39,6 +42,12 @@ final class DialModel {
         authorization == .authorizedWhenInUse || authorization == .authorizedAlways
     }
 
+    @ObservationIgnored private let terrainStore = TerrainStore()
+    @ObservationIgnored private var terrainTask: Task<Void, Never>?
+    @ObservationIgnored private var terrainCenter: GeoPoint?
+    @ObservationIgnored private var terrainObserver: GeoPoint?
+    @ObservationIgnored private var terrainRange = 0.0
+    @ObservationIgnored private var terrainRequestID = UUID()
     private let data = BundledPeakStore()
     private let settingsStore = SettingsStore()
     private let locationService = LocationService()
@@ -89,6 +98,7 @@ final class DialModel {
         location = point
         observerLocation = point
         updatePeaks(at: point)
+        loadTerrainIfNeeded()
         if let center = fetchedCenter,
            GeoMath.distanceKm(center.latitude, center.longitude, point.latitude, point.longitude) <= Self.refetchDistanceKm {
             return
@@ -99,6 +109,7 @@ final class DialModel {
     /// ピンチの倍率(前回からの変化分)。
     func onZoom(_ zoom: Double) {
         rangeKm = DialGeometry.zoomedRange(rangeKm, zoom: zoom)
+        loadTerrainIfNeeded()
         if DialGeometry.fetchRadiusKm(rangeKm) > fetchedRadiusKm { fetch() }
     }
 
@@ -109,6 +120,7 @@ final class DialModel {
         guard next != MapCenter(here.latitude, here.longitude) else { return }
         beginExploring()
         location = GeoPoint(latitude: next.latitude, longitude: next.longitude, mslAltitudeM: nil)
+        loadTerrainIfNeeded()
         fetchForViewport()
     }
 
@@ -137,6 +149,7 @@ final class DialModel {
         location = GeoPoint(latitude: next.latitude, longitude: next.longitude, mslAltitudeM: nil)
         rangeKm = range
         lockedHeading = nextHeading
+        loadTerrainIfNeeded()
         fetchForViewport()
     }
 
@@ -147,6 +160,7 @@ final class DialModel {
         exploring = false
         lockedHeading = nil
         updatePeaks(at: here)
+        loadTerrainIfNeeded(force: true)
         fetch()
     }
 
@@ -158,7 +172,7 @@ final class DialModel {
         fetch()
     }
 
-    func retry() { refreshDataInfo(); fetch() }
+    func retry() { refreshDataInfo(); fetch(); loadTerrainIfNeeded(force: true) }
 
     private func refreshDataInfo() {
         Task { @MainActor in
@@ -181,6 +195,48 @@ final class DialModel {
         if after.initialRangeKm != before.initialRangeKm {
             rangeKm = Double(after.initialRangeKm)
             if DialGeometry.fetchRadiusKm(rangeKm) > fetchedRadiusKm { fetch() }
+        }
+        if before.showTerrain != after.showTerrain || before.initialRangeKm != after.initialRangeKm {
+            loadTerrainIfNeeded(force: true)
+        }
+    }
+
+    private func loadTerrainIfNeeded(force: Bool = false) {
+        guard settings.showTerrain else {
+            terrainTask?.cancel()
+            terrainRequestID = UUID()
+            terrain = nil; terrainCenter = nil; terrainRange = 0
+            terrainLoading = false; terrainError = nil
+            return
+        }
+        guard let here = location else { return }
+        guard let observer = observerLocation else { return }
+        let range = rangeKm
+        if !force, let center = terrainCenter, let previousObserver = terrainObserver,
+           GeoMath.distanceKm(previousObserver.latitude, previousObserver.longitude, observer.latitude, observer.longitude) <= 0.2,
+           GeoMath.distanceKm(center.latitude,center.longitude,here.latitude,here.longitude) <= 0.2,
+           TerrainGeometry.zoom(range) == TerrainGeometry.zoom(terrainRange), range <= terrainRange * 1.2 { return }
+        let refining = terrainRange > 0 && TerrainGeometry.zoom(range) > TerrainGeometry.zoom(terrainRange)
+        terrainTask?.cancel()
+        let requestID = UUID()
+        terrainRequestID = requestID
+        terrainCenter = here; terrainRange = range; terrainObserver = observer
+        terrainLoading = true; terrainError = nil
+        terrainTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                if !refining { try await Task.sleep(nanoseconds: 80_000_000) }
+                let frame = try await terrainStore.render(latitude: observer.latitude, longitude: observer.longitude,
+                    viewportLatitude: here.latitude, viewportLongitude: here.longitude, rangeKm: range)
+                guard !Task.isCancelled, terrainRequestID == requestID else { return }
+                terrain = frame
+                terrainLoading = false
+            } catch {
+                guard !Task.isCancelled, terrainRequestID == requestID else { return }
+                terrainCenter = nil; terrainRange = 0
+                terrainLoading = false
+                terrainError = error.localizedDescription
+            }
         }
     }
 

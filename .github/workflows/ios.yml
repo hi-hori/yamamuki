@@ -16,10 +16,14 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
       - name: 内蔵山頂データを準備・検証
         run: |
-          python3 -m unittest discover -s ios -p 'test_prepare_peaks.py'
+          python3 -m unittest discover -s ios -p 'test_prepare*.py'
           python3 ios/prepare-peaks.py
+          python3 ios/prepare-terrain.py
+          swift ios/verify-terrain.swift ios/Generated/Terrain
       - name: core のテスト
         working-directory: ios/YamamukiCore
         run: swift test

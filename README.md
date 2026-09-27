@@ -4,7 +4,7 @@
 
 - Android 版: Kotlin + Jetpack Compose
 - iOS 版: Swift + SwiftUI（Android 版とほぼ同じ機能）
-- Android・iOSとも日本の山頂約1万4千件を内蔵し、初回から通信なしで使える。共通の配布パックは約320KB。
+- Android・iOSとも日本の山頂約1万4千件を内蔵し、初回から通信なしで使える。山頂の配布パックは約320KB。加えて約240MBの陰影地形パックを内蔵する。
 
 ## 構成
 
@@ -71,6 +71,7 @@
 
 ```bash
 cd ios
+python3 prepare-terrain.py  # 地形画像を検証してiOS用リソースを生成
 python3 prepare-peaks.py  # 共通パックを検証し、iOS用リソースを生成
 
 # core の単体テスト
@@ -146,7 +147,17 @@ open Yamamuki.xcodeproj
 
 ## 内蔵山頂データ
 
-地形・河川は含まない。山頂データはアプリ更新時に更新される。
+山頂と別パックで陰影地形・河川を内蔵する。山頂データはアプリ更新時に更新される。
 日本の名前付きOSM山頂・火山ノードを収録し、国外・無名・未登録の山は含まない。
 AndroidのINTERNET権限は使用しない。iOSも山データ取得通信を行わない。
 [素材の取得・オフライン再ビルド・ライセンス](tools/bundled_peaks/README.md) を参照。
+
+## 陰影地形の表示
+
+Android・iOSとも512px WebPの陰影地形をオフライン表示する。設定の「地形を表示」で切り替えられる。
+海は濃い青、川は明るい青。北海道の大部分の河川は未収録。
+現在位置移動・二本指回転・方角スワイプに追従し、山頂と同じ地点を基準に描画する。
+
+地形は国土地理院の標高タイルを加工したもの。河川は © OpenStreetMap contributors (ODbL)。
+設定から河川データと出典・ライセンスを保存できる。
+[Git LFSによる取得、再ビルド、出典と表示精度](tools/terrain/README.md)を参照。

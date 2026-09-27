@@ -85,7 +85,26 @@ val verifyBundledData by tasks.registering {
         }
     }
 }
-tasks.named("preBuild") { dependsOn(verifyBundledData) }
+val verifyTerrainData by tasks.registering {
+    val pack = layout.projectDirectory.file("src/main/assets/offline/terrain.zip")
+    val hash = layout.projectDirectory.file("src/main/assets/offline/terrain.sha256")
+    inputs.files(pack, hash)
+    doLast {
+        val digest = MessageDigest.getInstance("SHA-256")
+        pack.asFile.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        check(digest.digest().joinToString("") { "%02x".format(it) } == hash.asFile.readText().trim()) {
+            "地形パックのSHA-256が一致しません。Git LFSの実データを取得してください。"
+        }
+    }
+}
+tasks.named("preBuild") { dependsOn(verifyBundledData, verifyTerrainData) }
 
 kotlin {
     compilerOptions {

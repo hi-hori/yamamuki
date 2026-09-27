@@ -3,3 +3,7 @@ tools/bundled_peaks/*.txt text eol=crlf
 app/src/main/assets/offline/peaks.zip -text
 # Preserve whitespace in the bundled third-party license text.
 tools/bundled_peaks/ODbL-1.0.txt whitespace=-blank-at-eol
+
+app/src/main/assets/offline/terrain.zip filter=lfs diff=lfs merge=lfs -text
+tools/terrain/*.py text eol=crlf
+tools/terrain/*.txt text eol=crlf
