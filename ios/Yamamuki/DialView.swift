@@ -10,20 +10,25 @@ struct DialView: View {
     /// 選んだ山は ID で持ち、表示中の一覧から引く。歩いて現在地が変わると距離も更新される。
     @State private var selectedId: Int64?
     @State private var showSettings = false
-    @State private var lastMagnification: CGFloat = 1
 
     var body: some View {
         ZStack {
             dialBeige.ignoresSafeArea()
 
             DialCanvasView(
-                headingDeg: model.heading ?? 0,
+                headingDeg: model.displayHeading,
                 mountains: model.mountains,
                 rangeKm: model.rangeKm,
                 summit: model.summit,
-                altitudeM: model.location?.mslAltitudeM,
+                altitudeM: model.observerLocation?.mslAltitudeM,
                 maxPeaks: model.settings.maxPeaks,
                 textScale: model.settings.textScale,
+                observerLocation: model.observerLocation,
+                viewportLocation: model.location,
+                compassHeading: model.heading ?? model.displayHeading,
+                onPan: { model.onPan(dx: $0, dy: $1, chartHeight: $2) },
+                onHeadingSwipe: { model.onHeadingSwipe(dx: $0, width: $1) },
+                onTransform: { model.onTransform(zoom: $0, rotation: $1, previous: $2, midpoint: $3, chartHeight: $4) },
                 onMountainTap: { selectedId = $0.mountain.osmId }
             )
 
@@ -33,15 +38,29 @@ struct DialView: View {
                 }
             } else if model.hasLocationPermission {
                 VStack {
+                    if model.exploring {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text("手動移動・2本指で地図を回転").font(.caption)
+                                if let center = model.location {
+                                    Text(String(format: "%.4f, %.4f", center.latitude, center.longitude)).font(.caption2)
+                                }
+                            }
+                            Button("現在地に戻る", action: model.resetCenter)
+                        }
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 8)
+                        .background(dialBeige)
+                    }
                     StatusLine(
                         message: statusMessage,
                         // 手動取得モードでは左下の更新ボタンで取り直すので、ここには出さない。
                         actionLabel: model.offline && model.isConnected && !model.loading && !model.settings.manualFetch ? "再取得" : nil,
                         onAction: model.retry
                     )
-                    .padding(.top, 76)
                     Spacer()
                 }
+                .padding(.top, 76)
             }
 
             VStack {
@@ -56,15 +75,6 @@ struct DialView: View {
                 .padding(8)
             }
         }
-        .simultaneousGesture(
-            MagnifyGesture()
-                .onChanged { value in
-                    // 前回からの変化分だけを渡す(Android 版のピンチと同じ扱い)。
-                    model.onZoom(Double(value.magnification / lastMagnification))
-                    lastMagnification = value.magnification
-                }
-                .onEnded { _ in lastMagnification = 1 }
-        )
         .onAppear { model.start() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.start() } else { model.stop() }
@@ -91,7 +101,7 @@ struct DialView: View {
             SettingsView(model: model).fetchErrorAlert(model)
         }
         .sheet(item: selectedMountain) { nearby in
-            MountainDetailView(nearby: nearby).fetchErrorAlert(model)
+            MountainDetailView(nearby: nearby, fromObserver: model.exploring).fetchErrorAlert(model)
         }
     }
 
@@ -235,6 +245,7 @@ private struct PermissionRequest: View {
 /// タップした山の詳細。
 private struct MountainDetailView: View {
     let nearby: NearbyMountain
+    let fromObserver: Bool
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -247,7 +258,7 @@ private struct MountainDetailView: View {
             }
             DetailRow(label: "標高", value: m.elevationText)
             DetailRow(label: "緯度経度", value: m.coordinateText)
-            DetailRow(label: "現在地からの距離", value: distanceText(nearby.distanceKm))
+            DetailRow(label: fromObserver ? "双眼鏡の位置からの距離" : "現在地からの距離", value: distanceText(nearby.distanceKm))
             Spacer()
         }
         .padding(24)

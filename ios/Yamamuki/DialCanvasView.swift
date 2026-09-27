@@ -27,7 +27,7 @@ extension Color {
 }
 
 /// 画面上部の方位目盛りに収める角度の幅。
-private let tapeSpanDeg = 60.0
+private let tapeSpanDeg = DialGeometry.tapeSpanDeg
 
 /// 山アイコンの縁取りの太さ。3 種類とも同じ太さにそろえる。
 private let outlineWidth: CGFloat = 1.5
@@ -49,6 +49,12 @@ struct DialCanvasView: View {
     let maxPeaks: Int
     /// 文字の大きさ(標準 = 1.0 に対する倍率)。
     let textScale: Double
+    let observerLocation: GeoPoint?
+    let viewportLocation: GeoPoint?
+    let compassHeading: Double
+    let onPan: (Double, Double, Double) -> Void
+    let onHeadingSwipe: (Double, Double) -> Void
+    let onTransform: (Double, Double, PlanOffset, PlanOffset, Double) -> Void
     let onMountainTap: (NearbyMountain) -> Void
 
     @State private var hitTargets = HitTargets()
@@ -57,12 +63,11 @@ struct DialCanvasView: View {
         Canvas { context, size in
             draw(context, size: size)
         }
-        .contentShape(Rectangle())
-        .gesture(
-            SpatialTapGesture().onEnded { value in
-                if let m = hitTargets.find(value.location, slop: 8) { onMountainTap(m) }
+        .overlay {
+            DialTouchSurface(onPan: onPan, onHeadingSwipe: onHeadingSwipe, onTransform: onTransform) { point in
+                if let m = hitTargets.find(point, slop: 8) { onMountainTap(m) }
             }
-        )
+        }
     }
 
     private func draw(_ ctx: GraphicsContext, size: CGSize) {
@@ -70,8 +75,15 @@ struct DialCanvasView: View {
         let tapeHeight: CGFloat = 44
         let chartTop = tapeHeight + 32
         // 双眼鏡が右下の「© OpenStreetMap contributors」と重ならない高さ。
-        let observer = CGPoint(x: size.width / 2, y: size.height - 52)
-        let pxPerKm = (observer.y - chartTop) / CGFloat(rangeKm)
+        let origin = CGPoint(x: size.width / 2, y: size.height - 52)
+        let pxPerKm = (origin.y - chartTop) / CGFloat(rangeKm)
+        var observer = origin
+        if let here = observerLocation, let viewport = viewportLocation {
+            let offset = PanGeometry.observerOffset(MapCenter(here.latitude, here.longitude),
+                viewport: MapCenter(viewport.latitude, viewport.longitude), heading: headingDeg)
+            observer.x += CGFloat(offset.x) * pxPerKm
+            observer.y -= CGFloat(offset.y) * pxPerKm
+        }
         if pxPerKm > 0 {
             drawRings(ctx, size: size, observer: observer, pxPerKm: pxPerKm, chartTop: chartTop, styles: styles)
             hitTargets.peaks = drawPeaks(ctx, size: size, observer: observer, pxPerKm: pxPerKm, chartTop: chartTop, styles: styles)
@@ -81,17 +93,30 @@ struct DialCanvasView: View {
         if let summit {
             hitTargets.summit = drawSummit(ctx, center: observer, summit: summit, styles: styles)
         } else {
-            drawBinoculars(ctx, center: observer)
+            drawBinoculars(rotatedObserver(ctx, center: observer), center: observer)
             hitTargets.summit = nil
         }
         drawTape(ctx, size: size, tapeHeight: tapeHeight)
         drawReadout(ctx, size: size, tapeHeight: tapeHeight, styles: styles)
     }
 
+    private func rotatedObserver(_ ctx: GraphicsContext, center: CGPoint) -> GraphicsContext {
+        var rotated = ctx
+        rotated.translateBy(x: center.x, y: center.y)
+        rotated.rotate(by: .degrees(Heading.delta(headingDeg, compassHeading)))
+        rotated.translateBy(x: -center.x, y: -center.y)
+        return rotated
+    }
+
     private func drawRings(_ ctx: GraphicsContext, size: CGSize, observer: CGPoint, pxPerKm: CGFloat, chartTop: CGFloat, styles: TextStyles) {
         let step = CGFloat(DialGeometry.ringStepKm(rangeKm))
-        let farthest = hypot(size.width / 2, observer.y)
-        var i = 1
+        let farthest = hypot(max(abs(observer.x), abs(size.width - observer.x)),
+            max(abs(chartTop - observer.y), abs(size.height - observer.y)))
+        let nearest = hypot(max(0, max(-observer.x, observer.x - size.width)),
+            max(0, max(chartTop - observer.y, observer.y - size.height)))
+        var ctx = ctx
+        ctx.clip(to: Path(CGRect(x: 0, y: chartTop, width: size.width, height: max(0, size.height - 52 - chartTop))))
+        var i = max(1, Int(nearest / (step * pxPerKm)))
         while step * CGFloat(i) * pxPerKm <= farthest {
             let km = step * CGFloat(i)
             let radius = km * pxPerKm
@@ -115,7 +140,7 @@ struct DialCanvasView: View {
             if placed.count >= maxPeaks { break }
             let o = DialGeometry.project(distanceKm: m.distanceKm, bearingDeg: m.bearingDeg, headingDeg: headingDeg)
             let p = CGPoint(x: observer.x + CGFloat(o.x) * pxPerKm, y: observer.y - CGFloat(o.y) * pxPerKm)
-            guard p.x >= 0, p.x <= size.width, p.y - PeakIcon.maxHeight >= chartTop, p.y < observer.y else { continue }
+            guard p.x >= 0, p.x <= size.width, p.y - PeakIcon.maxHeight >= chartTop, p.y < size.height - 52 else { continue }
             let icon = PeakIcon.of(m.mountain.elevationClass)
             let label = measuredText(ctx, m.mountain.name, size: styles.label, color: .black)
             let labelHalf = label.size.width / 2
@@ -174,7 +199,7 @@ struct DialCanvasView: View {
         let flag = polygon([at(2, -24), at(13, -20.5), at(2, -17)])
         let pole = line(at(2, -24), at(2, -8))
 
-        drawViewCone(ctx, apex: at(0, -6))
+        drawViewCone(rotatedObserver(ctx, center: center), apex: at(0, -6))
 
         // 白い縁取り → 本体の順に描く。
         let halo = StrokeStyle(lineWidth: 4, lineJoin: .round)
