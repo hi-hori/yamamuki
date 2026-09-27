@@ -1,8 +1,9 @@
 name: iOS
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, "codex/**", "claude/**"]
     paths: ["ios/**", ".github/workflows/ios.yml"]
   pull_request:
     paths: ["ios/**", ".github/workflows/ios.yml"]
@@ -14,21 +15,19 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: core のテスト
-        working-directory: ios/YamamukiCore
-        run: swift test
-      - name: Xcode プロジェクトの生成
-        working-directory: ios
+      - name: XcodeGen の準備
+        run: brew install xcodegen
+      - name: core の単体テストとシミュレーター向けビルド
+        shell: bash
         run: |
-          brew install xcodegen
-          xcodegen generate
-      - name: アプリのビルド(シミュレーター向け、署名なし)
-        working-directory: ios
-        run: |
-          xcodebuild build \
-            -project Yamamuki.xcodeproj \
-            -scheme Yamamuki \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO
+          set -o pipefail
+          bash ios/build-simulator.sh 2>&1 | tee ios-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-build-log
+          path: ios-build.log
+          retention-days: 14

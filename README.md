@@ -41,7 +41,7 @@
 | XcodeGen | `brew install xcodegen` で入れる |
 | 実行する端末 | iOS 17 以上の iPhone（縦向き固定） |
 
-- iOS アプリのビルドと iPhone への転送には Mac が必要。Mac が無くても、ビルドが通るかは GitHub Actions（`.github/workflows/ios.yml`）で確認できる。
+- iOS アプリのビルドと iPhone への転送には Mac が必要。Mac が無くても、core の単体テストとシミュレーター向けのビルドは GitHub Actions（`.github/workflows/ios.yml`）で確認できる。Actions ではログだけを保存し、アプリのバイナリは配布しない。
 - シミュレーターでも起動できるが、方位センサーが無いので方位盤は回らない。現在地はシミュレーターのメニュー（Features > Location）で指定する。
 
 ## ビルドと実行
@@ -82,7 +82,7 @@ open Yamamuki.xcodeproj
 
 - Xcode で `Yamamuki` ターゲットの「Signing & Capabilities」の Team に自分の Apple ID を選ぶ。無料の Apple ID でも、自分の iPhone に 7 日間有効な開発用署名で入れられる（期限が切れたら Xcode から入れ直す）。
 - iPhone を USB でつなぎ、Xcode 上部の実行先に選んで Run（⌘R）する。初回は iPhone の「設定 > プライバシーとセキュリティ > デベロッパモード」をオンにし、「設定 > 一般 > VPN とデバイス管理」で開発元を信頼する。
-- コマンドラインでビルドだけ確認するときは、CI と同じ次のコマンドを使う。
+- Mac のコマンドラインでビルドだけ確認するときは、次のコマンドを使う。
   ```bash
   xcodebuild build -project Yamamuki.xcodeproj -scheme Yamamuki \
     -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
