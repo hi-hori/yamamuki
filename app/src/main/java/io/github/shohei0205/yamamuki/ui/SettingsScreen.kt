@@ -94,7 +94,10 @@ fun SettingsScreen(
 
             HorizontalDivider()
             SectionTitle("表示")
-            SwitchRow("地形を表示", "内蔵の陰影地形を表示します。", settings.showTerrain) { v ->
+            SwitchRow("河川を表示", "河川の水面と線を表示します。地形OFFでも海と湖を表示します。", settings.showRivers) { v ->
+                onSettingsChange { it.copy(showRivers = v) }
+            }
+            SwitchRow("地形を表示", "内蔵の陰影地形と湖を表示します。", settings.showTerrain) { v ->
                 onSettingsChange { it.copy(showTerrain = v) }
             }
             Text("上部の方角表示を左右にスワイプすると、移動量に応じて地図の方位を変更できます。1本指のドラッグで地図・双眼鏡・同心円を一緒に移動できます。移動後は2本指の中間点を中心とした回転で地図の方位を変更できます。双眼鏡の向きは常にコンパスに追従します。「現在地に戻る」でGPS位置と地図の方位の自動追従を再開します。2本指のピンチで拡大・縮小できます。", style = MaterialTheme.typography.bodySmall)
@@ -261,6 +264,6 @@ private fun TerrainSection(onExport: (Uri) -> Unit, enabled: Boolean) {
     }
     Text("地形: 国土地理院の標高タイルを加工した陰影画像。国土地理院が作成した製品ではありません。", style = MaterialTheme.typography.bodySmall)
     TextButton(onClick = { uriHandler.openUri("https://www.gsi.go.jp/kikakuchousei/kikakuchousei40182.html") }) { Text("国土地理院コンテンツ利用規約") }
-    Text("河川 © OpenStreetMap contributors (ODbL)。北海道の大部分は未収録です。川幅は実測ではありません。", style = MaterialTheme.typography.bodySmall)
-    OutlinedButton(onClick = { save.launch("yamamuki-rivers-ODbL.zip") }, enabled = enabled) { Text("河川データとライセンスを保存") }
+    Text("湖・河川 © OpenStreetMap contributors (ODbL)。水面の形状を表示します。北海道の大部分の河川中心線は未収録です。線の太さは実測ではありません。", style = MaterialTheme.typography.bodySmall)
+    OutlinedButton(onClick = { save.launch("yamamuki-rivers-ODbL.zip") }, enabled = enabled) { Text("水面・河川データとライセンスを保存") }
 }

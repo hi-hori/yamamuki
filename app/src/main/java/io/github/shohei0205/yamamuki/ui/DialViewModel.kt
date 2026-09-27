@@ -2,6 +2,7 @@ package io.github.shohei0205.yamamuki.ui
 
 import android.app.Application
 import io.github.shohei0205.yamamuki.data.TerrainImage
+import io.github.shohei0205.yamamuki.data.RiverFrame
 import kotlinx.coroutines.ensureActive
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
@@ -34,6 +35,7 @@ data class DialUiState(
     val mountains: List<NearbyMountain> = emptyList(),
     val summit: NearbyMountain? = null,
     val rangeKm: Double = DialGeometry.DEFAULT_RANGE_KM,
+    val rivers: RiverFrame? = null,
     val terrain: List<TerrainImage> = emptyList(),
     val terrainLoading: Boolean = false,
     val terrainError: String? = null,
@@ -152,7 +154,7 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
             updated.observerLocation?.let { p -> updated.withPeaks(p) } ?: updated
         }
         if (before.initialRangeKm != after.initialRangeKm) load()
-        if (before.showTerrain != after.showTerrain || before.initialRangeKm != after.initialRangeKm) loadTerrain(force = true)
+        if (before.showTerrain != after.showTerrain || before.showRivers != after.showRivers || before.initialRangeKm != after.initialRangeKm) loadTerrain(force = true)
     }
 
     fun exportPeaks(uri: Uri) {
@@ -167,13 +169,19 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun loadTerrain(force: Boolean = false) {
-        if (!state.value.settings.showTerrain) {
+        val settings = state.value.settings
+        if (force) mutableState.update {
+            it.copy(terrain = if (settings.showTerrain) it.terrain else emptyList(),
+                rivers = if (settings.showRivers || settings.showTerrain) it.rivers else null)
+        }
+        if (!settings.showTerrain && !settings.showRivers) {
             terrainJob?.cancel(); terrainCenter = null; terrainRange = 0.0
-            mutableState.update { it.copy(terrain = emptyList(), terrainLoading = false, terrainError = null) }
+            mutableState.update { it.copy(terrain = emptyList(), rivers = null, terrainLoading = false, terrainError = null) }
             return
         }
         val here = state.value.location ?: return
         val range = state.value.rangeKm
+        val observer = state.value.observerLocation ?: here
         val center = terrainCenter
         if (!force && center != null &&
             GeoMath.distanceKm(center.latitude, center.longitude, here.latitude, here.longitude) <= 0.2 &&
@@ -185,9 +193,11 @@ class DialViewModel(application: Application) : AndroidViewModel(application) {
             mutableState.update { it.copy(terrainLoading = true, terrainError = null) }
             try {
                 if (!refining) delay(80)
-                val tiles = app.terrainData.terrain(here.latitude, here.longitude, range)
+                val tiles = if (settings.showTerrain) app.terrainData.terrain(here.latitude, here.longitude, range) else emptyList()
+                val rivers = app.terrainData.rivers(here.latitude, here.longitude,
+                    observer.latitude, observer.longitude, range, settings.showRivers, settings.showTerrain || settings.showRivers)
                 coroutineContext.ensureActive()
-                mutableState.update { it.copy(terrain = tiles, terrainLoading = false) }
+                mutableState.update { it.copy(terrain = tiles, rivers = rivers, terrainLoading = false) }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 terrainCenter = null

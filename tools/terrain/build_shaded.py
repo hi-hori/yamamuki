@@ -9,11 +9,11 @@ import math
 from pathlib import Path
 import zipfile
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 from scipy import ndimage as ndi
 import build_data as b
 import terrain_reconstruction as reconstruction
-
+import river_vectors
 
 def shade(field, metres):
     """Return the central 256px, using a two-pixel halo to avoid tile seams."""
@@ -32,8 +32,8 @@ def shade(field, metres):
     return Image.fromarray(rgb[2:-2,2:-2])
 
 
-def render_image(key,dem,index):
-    """Generate an uncompressed 512px tile including rivers, from source DEM."""
+def render_image(key,dem):
+    """Generate an uncompressed 512px tile without rivers, from source DEM."""
     z,x,y=key
     field=np.full((272,272),np.nan)
     for dy in (-1,0,1):
@@ -45,10 +45,6 @@ def render_image(key,dem,index):
     _,lat=b.lonlat(x+.5,y+.5,z)
     metres=40075016.6856*math.cos(math.radians(lat))/(256*2**z)
     image=reconstruction.shade_refined(field,metres,2,8)
-    if image is not None:
-        draw=ImageDraw.Draw(image)
-        for line in index.get(key,[]):
-            draw.line([(px*2,py*2) for px,py in line],fill=b.RIVER_COLOR,width=4,joint='curve')
     return image
 
 
@@ -58,7 +54,7 @@ def build(args):
         catalog=sorted({tuple(map(int,n.split('/')[1:3]+[n.split('/')[3].split('.')[0]]))
             for n in names if n.startswith(('terrain/','vector/')) and n.split('/')[1] in ('10','11','12')})
         assert len(catalog)>10000, 'A nationwide z12 terrain/vector pack is required'
-        retained={n:archive.read(n) for n in names if not n.startswith(('terrain/','vector/'))}
+        retained={n:archive.read(n) for n in names if not n.startswith(('terrain/','vector/','rivers/'))}
     inputs=b.Inputs(args.cache,args.offline)
     needed=sorted({(z,x+dx,y+dy) for z,x,y in catalog for dx in (-1,0,1) for dy in (-1,0,1)})
     def fetch(tile):
@@ -76,13 +72,10 @@ def build(args):
     work=args.cache.parent/'shaded-rendered'
     rendered=[]
     for zoom in (10,11,12):
-        # Keep the geographic stroke margin at one source pixel. Indexing at
-        # the enlarged size would omit rivers whose wider strokes cross a tile.
-        index=b.river_tiles(rivers,zoom,256)
         tiles=[key for key in catalog if key[0]==zoom]
         def render(key):
             z,x,y=key
-            image=render_image(key,dem,index)
+            image=render_image(key,dem)
             if image is None: return None
             path=work/f'{z}/{x}/{y}.webp'
             path.parent.mkdir(parents=True,exist_ok=True)
@@ -98,7 +91,11 @@ def build(args):
     manifest['terrain']=dict(encoding='hillshade-webp',min_zoom=10,max_zoom=12,tile_size=512,
         tile_count=len(rendered),webp_quality=args.quality,webp_lossless=False,source=b.GSI,
         source_grid_size=256,approx_source_metres_at_36N=30.9194,shade_exaggeration=1.5,
-        water_color_rgb=b.WATER_COLOR,river_color_rgb=b.RIVER_COLOR)
+        water_color_rgb=b.WATER_COLOR,river_color_rgb=b.RIVER_COLOR,
+        rivers_baked_in=False)
+    vector_tiles=list(river_vectors.tiles(rivers))
+    manifest['river_vectors']=river_vectors.metadata(len(vector_tiles))
+    manifest['river_builder_sha256']=b.sha(Path(river_vectors.__file__).read_bytes())
     manifest['terrain']['refinement']=dict(zooms=[10,11,12],scale=2,
         algorithm='direction-weighted-pchip-relight-v1',normal_sigma_source_pixels=.4,
         halo_source_pixels=8,pixel_centres=True)
@@ -114,6 +111,7 @@ def build(args):
     temp=args.output.with_suffix('.shaded.tmp.zip')
     with zipfile.ZipFile(temp,'w') as archive:
         for n,data in sorted(retained.items()): b.zip_add(archive,n,data)
+        for name,data in vector_tiles: b.zip_add(archive,name,data)
         for (z,x,y),path in sorted(rendered): b.zip_add(archive,f'terrain/{z}/{x}/{y}.webp',path.read_bytes())
     temp.replace(args.output)
     args.output.with_suffix('.sha256').write_text(b.sha(args.output.read_bytes())+'\n',encoding='ascii')

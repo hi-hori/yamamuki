@@ -30,7 +30,7 @@ python3 -m unittest discover -s . -p 'test_prepare_peaks.py'
 標高フィルター、設定からZIPを保存してCSV・ライセンスが取り出せること。
 
 地形パックの更新後は `python3 prepare-terrain.py` を再実行する。
-`Generated/Terrain` はGit管理外。地形画像と河川データの保存用ZIPを含む。
+`Generated/Terrain` はGit管理外。地形画像、河川ベクタータイル、水面ポリゴンタイルと水面・河川データの保存用ZIPを含む。
 macOSでは `swift verify-terrain.swift Generated/Terrain` で全画像のImageIO復号を確認できる。
-追加確認項目: 地形の表示切り替え、16km・50km境界の解像度切り替え、
-手動移動・回転時の山頂と地形の位置合わせ、河川データとライセンスの保存。
+追加確認項目: 地形・河川の個別ON/OFFと設定の保存、広域表示での河川の間引き、16km・50km境界の解像度切り替え、
+手動移動・回転時の山頂・地形・河川の位置合わせ、琵琶湖の水面と島、河川データとライセンスの保存。

@@ -60,17 +60,18 @@ actor TerrainStore {
             do {
                 for key in TerrainGeometry.covering(latitude: viewportLatitude,longitude: viewportLongitude,radiusKm: radius,zoom: zoom) {
                     try Task.checkCancellation()
-                    let url = root.appendingPathComponent(key.path)
+                    let path = key.path
+                    let url = root.appendingPathComponent(path)
                     guard FileManager.default.fileExists(atPath: url.path) else { continue }
                     let image: UIImage
-                    if let hit = cache.object(forKey: key.path as NSString) { image = hit }
+                    if let hit = cache.object(forKey: path as NSString) { image = hit }
                     else {
                         guard let source = CGImageSourceCreateWithURL(url as CFURL,nil),
                               let cg = CGImageSourceCreateImageAtIndex(source,0,
                                 [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
                               cg.width == 512, cg.height == 512 else { throw TerrainError.invalidTile }
                         image = UIImage(cgImage: cg)
-                        cache.setObject(image,forKey: key.path as NSString,cost: cg.bytesPerRow * cg.height)
+                        cache.setObject(image,forKey: path as NSString,cost: cg.bytesPerRow * cg.height)
                     }
                     found = true
                     let mesh = TerrainGeometry.mesh(key,latitude: latitude,longitude: longitude).map {

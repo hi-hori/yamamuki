@@ -2,6 +2,7 @@ import SwiftUI
 import YamamukiCore
 
 let dialBeige = Color(hex: 0xEFE4B0)
+private let dialWater = Color(hex: 0x5291B4)
 private let ringGray = Color(hex: 0xC3C3C3)
 private let peakGreen = Color(hex: 0x22B14C)
 private let peakYellow = Color(hex: 0xB5E61D)
@@ -50,6 +51,9 @@ struct DialCanvasView: View {
     /// 文字の大きさ(標準 = 1.0 に対する倍率)。
     let textScale: Double
     let terrain: TerrainFrame?
+    let rivers: RiverFrame?
+    let showRivers: Bool
+    let showLakes: Bool
     let observerLocation: GeoPoint?
     let viewportLocation: GeoPoint?
     let compassHeading: Double
@@ -87,6 +91,7 @@ struct DialCanvasView: View {
         }
         if pxPerKm > 0 {
             drawTerrain(ctx, size: size, observer: observer, pxPerKm: pxPerKm, chartTop: chartTop)
+            drawRivers(ctx, size: size, observer: observer, pxPerKm: pxPerKm, chartTop: chartTop)
             drawRings(ctx, size: size, observer: observer, pxPerKm: pxPerKm, chartTop: chartTop, styles: styles)
             hitTargets.peaks = drawPeaks(ctx, size: size, observer: observer, pxPerKm: pxPerKm, chartTop: chartTop, styles: styles)
         } else {
@@ -115,6 +120,38 @@ struct DialCanvasView: View {
         let radius = CGFloat(terrain.radiusKm) * pxPerKm
         context.draw(Image(decorative: terrain.image, scale: 1, orientation: .up),
             in: CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2))
+    }
+
+    private func drawRivers(_ ctx: GraphicsContext, size: CGSize, observer: CGPoint, pxPerKm: CGFloat, chartTop: CGFloat) {
+        guard let rivers, let here = observerLocation else { return }
+        let offset = DialGeometry.project(
+            distanceKm: GeoMath.distanceKm(here.latitude, here.longitude, rivers.latitude, rivers.longitude),
+            bearingDeg: GeoMath.bearingDeg(here.latitude, here.longitude, rivers.latitude, rivers.longitude), headingDeg: headingDeg)
+        var context = ctx
+        context.clip(to: Path(CGRect(x: 0, y: chartTop, width: size.width, height: max(0, size.height - 52 - chartTop))))
+        context.translateBy(x: observer.x + CGFloat(offset.x) * pxPerKm, y: observer.y - CGFloat(offset.y) * pxPerKm)
+        context.rotate(by: .degrees(-headingDeg))
+        context.scaleBy(x: pxPerKm, y: pxPerKm)
+        let riverX = Double(observer.x) + offset.x * Double(pxPerKm)
+        let riverY = Double(observer.y) - offset.y * Double(pxPerKm)
+        for batch in rivers.batches where showRivers {
+            if batch.bounds.visible(originX: riverX, originY: riverY, scale: Double(pxPerKm), heading: headingDeg,
+                width: Double(size.width), chartTop: Double(chartTop), chartBottom: Double(size.height - 52),
+                padding: rivers.widthKm * Double(pxPerKm) / 2 + 1) {
+                context.stroke(Path(batch.path), with: .color(dialWater),
+                    style: StrokeStyle(lineWidth: CGFloat(rivers.widthKm), lineCap: .round, lineJoin: .round))
+            }
+        }
+        for batch in rivers.water {
+            if batch.sea ? !showLakes : (batch.river ? !showRivers : !showLakes) { continue }
+            if batch.bounds.visible(originX: riverX, originY: riverY, scale: Double(pxPerKm), heading: headingDeg,
+                width: Double(size.width), chartTop: Double(chartTop), chartBottom: Double(size.height - 52), padding: 1) {
+                let path = Path(batch.path)
+                context.fill(path, with: .color(dialWater), style: FillStyle(eoFill: true))
+                // Cover fractional-pixel seams between neighbouring clipped tiles.
+                context.stroke(path, with: .color(dialWater), lineWidth: 1 / pxPerKm)
+            }
+        }
     }
 
     private func rotatedObserver(_ ctx: GraphicsContext, center: CGPoint) -> GraphicsContext {

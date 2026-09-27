@@ -29,6 +29,7 @@ final class DialModel {
     private(set) var heading: Double?
     /// 現在地から画面上端までの距離。
     private(set) var rangeKm: Double
+    private(set) var rivers: RiverFrame?
     private(set) var terrain: TerrainFrame?
     private(set) var terrainLoading = false
     private(set) var terrainError: String?
@@ -42,6 +43,7 @@ final class DialModel {
         authorization == .authorizedWhenInUse || authorization == .authorizedAlways
     }
 
+    @ObservationIgnored private let riverStore = RiverStore()
     @ObservationIgnored private let terrainStore = TerrainStore()
     @ObservationIgnored private var terrainTask: Task<Void, Never>?
     @ObservationIgnored private var terrainCenter: GeoPoint?
@@ -196,13 +198,16 @@ final class DialModel {
             rangeKm = Double(after.initialRangeKm)
             if DialGeometry.fetchRadiusKm(rangeKm) > fetchedRadiusKm { fetch() }
         }
-        if before.showTerrain != after.showTerrain || before.initialRangeKm != after.initialRangeKm {
+        if before.showTerrain != after.showTerrain || before.showRivers != after.showRivers || before.initialRangeKm != after.initialRangeKm {
             loadTerrainIfNeeded(force: true)
         }
     }
 
     private func loadTerrainIfNeeded(force: Bool = false) {
-        guard settings.showTerrain else {
+        let showTerrain = settings.showTerrain, showRivers = settings.showRivers
+        if force && !showTerrain { terrain = nil }
+        if !showRivers && !showTerrain { rivers = nil }
+        guard showTerrain || showRivers else {
             terrainTask?.cancel()
             terrainRequestID = UUID()
             terrain = nil; terrainCenter = nil; terrainRange = 0
@@ -226,10 +231,18 @@ final class DialModel {
             guard let self else { return }
             do {
                 if !refining { try await Task.sleep(nanoseconds: 80_000_000) }
-                let frame = try await terrainStore.render(latitude: observer.latitude, longitude: observer.longitude,
-                    viewportLatitude: here.latitude, viewportLongitude: here.longitude, rangeKm: range)
+                var frame: TerrainFrame?
+                var riverFrame: RiverFrame?
+                if showTerrain {
+                    frame = try await terrainStore.render(latitude: observer.latitude, longitude: observer.longitude,
+                        viewportLatitude: here.latitude, viewportLongitude: here.longitude, rangeKm: range)
+                }
+                riverFrame = try await riverStore.render(latitude: observer.latitude, longitude: observer.longitude,
+                    viewportLatitude: here.latitude, viewportLongitude: here.longitude, rangeKm: range,
+                    showRivers: showRivers, showLakes: showTerrain || showRivers)
                 guard !Task.isCancelled, terrainRequestID == requestID else { return }
                 terrain = frame
+                rivers = riverFrame
                 terrainLoading = false
             } catch {
                 guard !Task.isCancelled, terrainRequestID == requestID else { return }

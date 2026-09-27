@@ -15,6 +15,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -47,6 +48,8 @@ import io.github.shohei0205.yamamuki.core.PanGeometry
 import io.github.shohei0205.yamamuki.core.MapCenter
 import io.github.shohei0205.yamamuki.core.TerrainGeometry
 import io.github.shohei0205.yamamuki.data.TerrainImage
+import io.github.shohei0205.yamamuki.data.RiverFrame
+import io.github.shohei0205.yamamuki.core.GeoMath
 import io.github.shohei0205.yamamuki.core.declutter
 import io.github.shohei0205.yamamuki.core.elevationClass
 import kotlin.math.hypot
@@ -109,6 +112,9 @@ fun DialCanvas(
     maxPeaks: Int = 40,
     /** 文字の大きさ(標準 = 1.0 に対する倍率)。 */
     textScale: Float = 1f,
+    rivers: RiverFrame? = null,
+    showRivers: Boolean = true,
+    showLakes: Boolean = true,
     terrain: List<TerrainImage> = emptyList(),
     latitude: Double? = null,
     longitude: Double? = null,
@@ -120,6 +126,16 @@ fun DialCanvas(
         if (latitude == null || longitude == null) emptyList() else
             terrain.map { tile -> TerrainMesh(tile, TerrainGeometry.mesh(tile.key, latitude, longitude)) }
     }
+    val riverPaint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = TerrainWater.toArgb()
+        style = android.graphics.Paint.Style.STROKE
+        strokeCap = android.graphics.Paint.Cap.ROUND
+        strokeJoin = android.graphics.Paint.Join.ROUND
+    } }
+    val waterPaint = remember { android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = TerrainWater.toArgb()
+        style = android.graphics.Paint.Style.FILL_AND_STROKE
+    } }
     val terrainPaint = remember { android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG) }
     val styles = remember(textScale) { DialTextStyles(textScale) }
     val textMeasurer = rememberTextMeasurer(cacheSize = 256)
@@ -141,6 +157,40 @@ fun DialCanvas(
         val observer = origin + Offset((offset.x * pxPerKm).toFloat(), (-offset.y * pxPerKm).toFloat())
         hitTargets.peaks = if (pxPerKm > 0f) {
             drawTerrain(observer, pxPerKm, headingDeg, meshes, chartTop, terrainPaint)
+            if (rivers != null && latitude != null && longitude != null) {
+                val shift = DialGeometry.project(GeoMath.distanceKm(latitude, longitude, rivers.latitude, rivers.longitude),
+                    GeoMath.bearingDeg(latitude, longitude, rivers.latitude, rivers.longitude), headingDeg)
+                clipRect(top = chartTop, bottom = size.height - 52.dp.toPx()) {
+                    drawIntoCanvas { canvas ->
+                        val native = canvas.nativeCanvas
+                        native.save()
+                        val riverX = observer.x + (shift.x * pxPerKm).toFloat()
+                        val riverY = observer.y - (shift.y * pxPerKm).toFloat()
+                        native.translate(riverX, riverY)
+                        native.rotate(-headingDeg.toFloat())
+                        native.scale(pxPerKm, pxPerKm)
+                        riverPaint.strokeWidth = rivers.widthKm.toFloat()
+                        if (showRivers) for (batch in rivers.batches) {
+                            if (batch.bounds.visible(riverX.toDouble(), riverY.toDouble(), pxPerKm.toDouble(),
+                                headingDeg, size.width.toDouble(), chartTop.toDouble(),
+                                (size.height - 52.dp.toPx()).toDouble(), rivers.widthKm * pxPerKm / 2 + 1)) {
+                                native.drawPath(batch.path, riverPaint)
+                            }
+                        }
+                        // Cover fractional-pixel seams between clipped water tiles.
+                        waterPaint.strokeWidth = 1f / pxPerKm
+                        for (batch in rivers.water) {
+                            if (if (batch.sea) !showLakes else if (batch.river) !showRivers else !showLakes) continue
+                            if (batch.bounds.visible(riverX.toDouble(), riverY.toDouble(), pxPerKm.toDouble(),
+                                headingDeg, size.width.toDouble(), chartTop.toDouble(),
+                                (size.height - 52.dp.toPx()).toDouble(), 1.0)) {
+                                native.drawPath(batch.path, waterPaint)
+                            }
+                        }
+                        native.restore()
+                    }
+                }
+            }
             drawRings(observer, pxPerKm, rangeKm, chartTop, textMeasurer, styles)
             drawPeaks(observer, pxPerKm, headingDeg, mountains, chartTop, textMeasurer, styles, maxPeaks)
         } else {

@@ -3,6 +3,7 @@ import YamamukiCore
 
 /// 設定画面で変えられる値。
 struct Settings: Codable, Equatable {
+    var showRivers = true
     var showTerrain = true
     /// この標高(m)以上の山だけ方位盤に出す。0 なら絞り込まない。
     var minElevationM = 0
@@ -26,6 +27,7 @@ struct Settings: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = Settings()
+        showRivers = try c.decodeIfPresent(Bool.self, forKey: .showRivers) ?? d.showRivers
         showTerrain = try c.decodeIfPresent(Bool.self, forKey: .showTerrain) ?? d.showTerrain
         minElevationM = try c.decodeIfPresent(Int.self, forKey: .minElevationM) ?? d.minElevationM
         keepScreenOn = try c.decodeIfPresent(Bool.self, forKey: .keepScreenOn) ?? d.keepScreenOn
