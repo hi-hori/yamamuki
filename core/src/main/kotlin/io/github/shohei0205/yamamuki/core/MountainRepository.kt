@@ -1,5 +1,8 @@
 package io.github.shohei0205.yamamuki.core
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+
 /** 山データのローカルキャッシュ。Android では Room で実装する。 */
 interface MountainCache {
     /** 指定タイルのうち取得済みのものと、その取得時刻(epoch ms)。 */
@@ -21,6 +24,34 @@ data class MountainQueryResult(
     /** 取り直すべきタイルがあったが、allowNetwork = false のため通信しなかった。 */
     val networkSkipped: Boolean = false,
 )
+
+/** 事前ダウンロードの進み具合(タイル数)。 */
+data class DownloadProgress(
+    val doneTiles: Int,
+    val totalTiles: Int,
+    /** 問い合わせに失敗して取り直している回数。0 なら取り直していない。 */
+    val retry: Int = 0,
+    /** 取り直す前に待つ時間。この知らせのあと、これだけ待ってから問い合わせる。 */
+    val retryWaitMillis: Long = 0,
+) {
+    val fraction: Float get() = if (totalTiles == 0) 1f else doneTiles.toFloat() / totalTiles
+
+    /**
+     * 区画数が増えない間も進んでいることが分かるよう、今の区画の状況を 1 秒単位で表す。
+     * Overpass は集計が終わるまで何も返さないので、受信量ではなく待っている秒数を出す。
+     * @param elapsedMillis この知らせを受け取ってからの時間。
+     */
+    fun statusText(elapsedMillis: Long): String {
+        val retryNote = if (retry > 0) "・取り直し $retry 回目" else ""
+        return if (retry > 0 && elapsedMillis < retryWaitMillis) {
+            val left = (retryWaitMillis - elapsedMillis + 999) / 1000
+            "通信に失敗したため、$left 秒後に取り直します（$retry 回目）"
+        } else {
+            val waited = (elapsedMillis - if (retry > 0) retryWaitMillis else 0) / 1000
+            "サーバーの応答を待っています（$waited 秒$retryNote）"
+        }
+    }
+}
 
 /**
  * 現在地周辺の山を返す。キャッシュを優先し、未取得または古いタイルだけ Overpass に問い合わせる。
@@ -75,7 +106,71 @@ class MountainRepository(
         return MountainQueryResult(nearby, incomplete = missing.isNotEmpty(), error = error, networkSkipped = networkSkipped)
     }
 
+    /**
+     * 目的地など、現在地から離れた地域のタイルを前もって取得する(圏外に備えた事前ダウンロード)。
+     * 数タイルずつ Overpass に問い合わせ、終わるたびに保存して [onProgress] を呼ぶ。
+     * Overpass は混み合うと 504 やタイムアウトを返すので、問い合わせが失敗したら [retryDelaysMillis] の間隔で取り直す。
+     * 途中で失敗・中断しても取得済みのタイルは残り、もう一度呼べば残りだけを取得する。
+     *
+     * @param forceRefresh true なら取得済みのタイルも取り直す(保存済みの地域の更新)。
+     * @return 対象タイルにある山の数。
+     * @throws Exception 取り直しても通信に失敗した。それまでに取得したタイルは保存済み。
+     */
+    suspend fun downloadTiles(
+        tiles: Collection<Tile>,
+        forceRefresh: Boolean = false,
+        maxAgeMillis: Long = this.maxAgeMillis,
+        retryDelaysMillis: List<Long> = DOWNLOAD_RETRY_DELAYS_MILLIS,
+        onProgress: (DownloadProgress) -> Unit = {},
+    ): Int {
+        val all = tiles.distinct()
+        val now = clock()
+        val fetched = cache.fetchedAt(all)
+        val toFetch = all.filter { tile ->
+            val at = fetched[tile]
+            forceRefresh || at == null || now - at > maxAgeMillis
+        }
+        var done = all.size - toFetch.size
+        onProgress(DownloadProgress(done, all.size))
+        for (chunk in downloadChunks(toFetch)) {
+            var attempt = 0
+            var peaks: List<Mountain>? = null
+            while (peaks == null) {
+                try {
+                    peaks = remote.fetchPeaks(Tile.union(chunk))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    val wait = retryDelaysMillis.getOrNull(attempt) ?: throw e
+                    attempt++
+                    onProgress(DownloadProgress(done, all.size, retry = attempt, retryWaitMillis = wait))
+                    delay(wait)
+                }
+            }
+            val targets = chunk.toSet()
+            cache.replaceTiles(chunk, peaks.filter { Tile.of(it.latitude, it.longitude) in targets }, clock())
+            done += chunk.size
+            onProgress(DownloadProgress(done, all.size))
+        }
+        if (all.isEmpty()) return 0
+        val targets = all.toSet()
+        return cache.mountainsIn(Tile.union(all)).count { Tile.of(it.latitude, it.longitude) in targets }
+    }
+
     companion object {
         const val DEFAULT_MAX_AGE_MILLIS = 30L * 24 * 60 * 60 * 1000
+
+        /** 事前ダウンロードで問い合わせが失敗したときに、取り直すまで待つ時間(回数分)。 */
+        val DOWNLOAD_RETRY_DELAYS_MILLIS = listOf(5_000L, 15_000L, 30_000L)
+
+        /** 事前ダウンロードで 1 回に問い合わせるタイルの縦横の数。1°四方なら混み合っていても応答が返りやすい。 */
+        const val DOWNLOAD_CHUNK_TILES = 2
+
+        /** タイルを [DOWNLOAD_CHUNK_TILES] 四方ごとにまとめる。北西から順に並べる。 */
+        fun downloadChunks(tiles: Collection<Tile>): List<List<Tile>> =
+            tiles.groupBy { Math.floorDiv(it.latIndex, DOWNLOAD_CHUNK_TILES) to Math.floorDiv(it.lonIndex, DOWNLOAD_CHUNK_TILES) }
+                .entries
+                .sortedWith(compareByDescending<Map.Entry<Pair<Int, Int>, List<Tile>>> { it.key.first }.thenBy { it.key.second })
+                .map { it.value }
     }
 }
